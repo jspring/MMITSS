@@ -1,0 +1,46 @@
+# Makefile_Linux	|	Sep 08 2011
+#
+#	This is the Linux makefile for the EyeControl plugin.
+#
+# Document Author: William Yu
+# Document Contributor(s):
+#
+# Revision History
+
+include $(CAPATH_MK_DEFS)
+
+CC = g++
+BASEDIR = ../../..
+PLUGINSDKDIR = $(BASEDIR)/Plugins\ SDK
+SDKGLUECODEDIR = $(PLUGINSDKDIR)/Glue\ Code
+SDKINCLUDEDIR = $(PLUGINSDKDIR)/Includes
+
+INCLUDE =	-I$(SDKINCLUDEDIR)
+
+PREFIXHEADER = $(SDKINCLUDEDIR)/LinuxHeader.h
+CFLAGS = -s -O2 -DIGNOREQT -D__INTEL__ -DLINUX=1 -D__GCC__ $(INCLUDE) -include $(PREFIXHEADER)
+CFLAGS += $(PATH_CFLAGS) -I$(ATSC_INC_DIR)
+LIBS = $(PATH_LIBS)
+BUILDOBJDIR = BuildLinux
+
+OBJS =	$(BUILDOBJDIR)/PluginMain.o $(BUILDOBJDIR)/mmitss_ui.o
+
+all: CreateBuildObjDir $(OBJS)
+	$(CC) -shared -Wl,--no-undefined -o mmitss_ui.so $(PATH_LDFLAGS) $(OBJS) $(LIBS)
+#	$(CC) $(CFLAGS) -shared -Wl,--no-undefined -o mmitss_ui.so $(PATH_LDFLAGS) $(OBJS) $(LIBS)
+
+CreateBuildObjDir:
+	mkdir -p $(BUILDOBJDIR)
+
+$(BUILDOBJDIR)/mmitss_ui.o: mmitss_ui.cpp
+	$(CC) $(CFLAGS) mmitss_ui.cpp -fPIC -o $@ $(PATH_CFLAGS)
+#	$(CC) $(CFLAGS) mmitss_ui.cpp -c -o $@ $(PATH_CFLAGS) $(BUILDOBJDIR)/PluginMain.o $(LIBS)
+#	$(CC) $(CFLAGS) mmitss_ui.cpp -o $@ $(PATH_CFLAGS) $(PATH_LDFLAGS) $(BUILDOBJDIR)/PluginMain.o $(LIBS)
+
+$(BUILDOBJDIR)/PluginMain.o: $(SDKGLUECODEDIR)/PluginMain.cpp
+	$(CC) $(CFLAGS) $(SDKGLUECODEDIR)/PluginMain.cpp -c -o $@
+#	$(CC) $(CFLAGS) $(SDKGLUECODEDIR)/PluginMain.cpp -o $@ $(PATH_LDFLAGS) $(LIBS)
+
+clean:
+	rm $(BUILDOBJDIR)/*.o -f
+	rm mmitss_ui.so
