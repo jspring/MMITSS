@@ -506,7 +506,11 @@ UInt32 GetSpat( REALobject instance ) {
 	raw_signal_status_msg_t raw_signal_status_msg;
 
 	db_clt_read(pclt, DB_SPAT_VAR, sizeof(raw_signal_status_msg_t), &raw_signal_status_msg);
-	spatword = (unsigned int)raw_signal_status_msg.intvA_timer;
+	spatword = raw_signal_status_msg.active_phase << 24 |
+		   raw_signal_status_msg.interval_A   << 16 |
+		   raw_signal_status_msg.interval_B   << 8  |
+		   raw_signal_status_msg.intvA_timer;
+	printf("spatword %x\n", spatword);
 
 // active_phase
 // interval_A
