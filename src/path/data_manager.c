@@ -10,12 +10,18 @@ typedef struct {
 	unsigned short portnum;
 } port_t;
 
-port_t port[] = { {"PerformanceObserverPort",PERF_OBSRV_PORT}, 
-		  {"TrajectoryAwarePort", TRAJ_AWARE_PORT}
+port_t port[] = { 
+		{"PriorityRequestPort", PRIO_REQ_PORT},
+		{"TrajectoryAwarePort", TRAJ_AWARE_PORT},
+		{"NomadicTrajectoryAwarePort", NOMADIC_TRAJ_AWARE_PORT},
+		{"TrafficControlPort", TRAF_CTL_PORT},
+		{"TrafficControlInterfacePort", TRAF_CTL_IFACE_PORT},
+		{"SpatBroadcastPort", SPAT_BCAST_PORT},
+		{"PerformanceObserverPort",PERF_OBSRV_PORT},
+		{"NomadicDevicePort", NOMADIC_DEV_PORT}
 };
 
-//int NUMPORTS = sizeof(port) / sizeof(port_t);
-int NUMPORTS = 2;
+int NUMPORTS = sizeof(port) / sizeof(port_t);
 
 int main( int argc, char *argv[]) {
 	int retval;
@@ -43,6 +49,7 @@ int main( int argc, char *argv[]) {
 	unsigned short socket_timeout = 10000;       //socket timeout in msec
 	char buf[BUFSIZE];
 	int i;
+	int j;
 	char tempstr[] = "Got message!";
 	char tempstr2[100];
 printf("Got to 0\n");
@@ -53,8 +60,8 @@ printf("Got to 0\n");
 	memset(&remote_addr[i], 0, sizeof(remote_addr));
    }
 
-printf("Got to 1\n");
-
+printf("Got to 1 NUMPORTS %d\n", NUMPORTS);
+/*
    while ((option = getopt(argc, argv, "vl:r:p:k:h")) != EOF) {
       switch (option) {
       case 'v':
@@ -81,7 +88,7 @@ printf("Got to 1\n");
          break;
       }
    }
-
+*/
 printf("Got to 2\n");
    //Zero out saved fds
    FD_ZERO(&readfds_sav);
@@ -104,6 +111,7 @@ printf("Got to 2\n");
 			FD_SET(sockfd[i], &readfds_sav);
 			FD_SET(sockfd[i], &writefds_sav);
 			if(sockfd[i] > maxfd) maxfd = sockfd[i];
+			printf("sockfd[%d] %d maxfd %d\n", i, sockfd[i], maxfd);
 		}
    }
 
@@ -117,30 +125,32 @@ printf("Got to 4\n");
         numready = select(maxfd+1, &readfds, NULL, NULL, NULL); // Tells me one of the old or new sockets is ready to read
 	
    	for(i = 0; i < NUMPORTS; i++) {
-	    if(newsockfd[i] <=0) {
+	    printf("i %d\n", i);
+	    if( (newsockfd[i] <=0) && (FD_ISSET(sockfd[i], &readfds)) ){
+		printf("Trying accept for %s(%d)\n", port[i].portdesc, port[i].portnum);
 		if ((newsockfd[i] = accept(sockfd[i], 
-			(struct sockaddr *) &remote_addr[i], &localaddrlen)) < 0) {
+			(struct sockaddr *) &remote_addr[i], &localaddrlen)) <= 0) {
 		   	sprintf(tempstr2, "accept failed for %s(%d)", port[i].portdesc, port[i].portnum);
 			perror(tempstr2);
 			continue;
 		}
-		FD_CLR(sockfd[i], &readfds_sav);
-		close(sockfd[i]);
-		FD_SET(newsockfd[i], &readfds_sav);
-		FD_SET(newsockfd[i], &writefds_sav);
-		if(newsockfd[i] > maxfd) maxfd = newsockfd[i];
+		   	printf("accept succeeded for %s(%d)\n", port[i].portdesc, port[i].portnum);
+			FD_CLR(sockfd[i], &readfds_sav);
+			close(sockfd[i]);
+			FD_SET(newsockfd[i], &readfds_sav);
+			FD_SET(newsockfd[i], &writefds_sav);
+			if(newsockfd[i] > maxfd) maxfd = newsockfd[i];
 	   }	
-	   else {
-		
+	   if( FD_ISSET(newsockfd[i], &readfds) ) {
 		memset(buf, 0, BUFSIZE);
-		if ((retval = read(newsockfd[i], buf, BUFSIZE)) <= 1) {
+		if ((retval = read(newsockfd[i], buf, BUFSIZE)) < 0) {
 		   	sprintf(tempstr2, "read failed for %s(%d)", port[i].portdesc, port[i].portnum);
 			perror(tempstr2);
 			FD_CLR(newsockfd[i], &readfds_sav);
 			FD_CLR(newsockfd[i], &writefds_sav);
 			close(newsockfd[i]);
 
-			newsockfd[i] = 0;
+			newsockfd[i] = -1;
 			sockfd[i] = OpenServerListener(local_ip, remote_ip, port[i].portnum);
 			if (sockfd[i] < 0) {
 		   	    sprintf(tempstr2, "OpenServerListener failed for %s(%d)", port[i].portdesc, port[i].portnum);
@@ -159,27 +169,18 @@ printf("Got to 4\n");
 	    	}
         	else {
 			printf("Read succeeded for %s\n", port[i].portdesc);
-			for(i=0; i<retval; i++)
-			    printf("%hhx ", buf[i]);
+			for(j=0; j<retval; j++)
+			    printf("%hhx ", buf[j]);
 			printf("\n");
-	
-			timeout.tv_sec = 0;
-			timeout.tv_usec = 500000;
-
-        		numready = select(maxfd+1, NULL, &writefds, NULL, &timeout); // Tells me one of the old or new sockets is ready to write
-			if(numready < 0) {
-				perror("write select");
-				continue;
-			}
-	    		else {
-				if (write(newsockfd[i], tempstr, sizeof(tempstr)) != sizeof(tempstr)) {
-                     	   		fprintf(stderr, "partial/failed write\n");
-                           		exit(EXIT_FAILURE);
-                       		}
-			}
 	  	}
+	  }
+	}
+   	for(i = 0; i < NUMPORTS; i++) {
+	    if( (newsockfd[i] >0) && (FD_ISSET(newsockfd[i], &writefds)) ){
+		printf("Trying write for %s(%d)\n", port[i].portdesc, port[i].portnum);
+		if( (write(newsockfd[i], &buf[0], retval)) != retval )
+			fprintf(stderr, "partial/failed write\n");
 	    }
-
 	}
     sleep(1);
     }
