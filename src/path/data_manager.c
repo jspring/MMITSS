@@ -8,17 +8,19 @@
 typedef struct {
 	char portdesc[100];
 	unsigned short portnum;
+	unsigned short *outport[3];
+#define NUMOUTPORTS	3
 } port_t;
 
 port_t port[] = { 
-		{"PriorityRequestPort", PRIO_REQ_PORT},
-		{"TrajectoryAwarePort", TRAJ_AWARE_PORT},
-		{"NomadicTrajectoryAwarePort", NOMADIC_TRAJ_AWARE_PORT},
-		{"TrafficControlPort", TRAF_CTL_PORT},
-		{"TrafficControlInterfacePort", TRAF_CTL_IFACE_PORT},
-		{"SpatBroadcastPort", SPAT_BCAST_PORT},
-		{"PerformanceObserverPort",PERF_OBSRV_PORT},
-		{"NomadicDevicePort", NOMADIC_DEV_PORT}
+		{"PriorityRequestPort", PRIO_REQ_PORT, {0, 0, 0} },
+		{"TrajectoryAwarePort", TRAJ_AWARE_PORT, {0, 0, 0} },
+		{"NomadicTrajectoryAwarePort", NOMADIC_TRAJ_AWARE_PORT, {0, 0, 0} },
+		{"TrafficControlPort", TRAF_CTL_PORT, {TRAF_CTL_IFACE_PORT, 0, 0} },
+		{"TrafficControlInterfacePort", TRAF_CTL_IFACE_PORT, {TRAF_CTL_PORT, SPAT_BCAST_PORT, 0} },
+		{"SpatBroadcastPort", SPAT_BCAST_PORT, {0, 0, 0} },
+		{"PerformanceObserverPort",PERF_OBSRV_PORT, {0, 0, 0} },
+		{"NomadicDevicePort", NOMADIC_DEV_PORT, {0, 0, 0} }
 };
 
 int NUMPORTS = sizeof(port) / sizeof(port_t);
@@ -47,21 +49,22 @@ int main( int argc, char *argv[]) {
 	int option;
 	int verbose = 0;
 	unsigned short socket_timeout = 10000;       //socket timeout in msec
-	char buf[BUFSIZE];
+	char buf[NUMPORTS][BUFSIZE];
 	int i;
 	int j;
 	char tempstr[] = "Got message!";
 	char tempstr2[100];
-printf("Got to 0\n");
+
+printf("Got to 0 NUMPORTS %d\n", NUMPORTS);
 
    for(i=0; i<NUMPORTS; i++) {
-	memset(&sockfd[i], -1, sizeof(sockfd));
-	memset(&newsockfd[i], -1, sizeof(newsockfd));
-	memset(&remote_addr[i], 0, sizeof(remote_addr));
+	memset(&sockfd[i], -1, sizeof(sockfd[i]));
+	memset(&newsockfd[i], -1, sizeof(newsockfd[i]));
+	memset(&remote_addr[i], 0, sizeof(remote_addr[i]));
    }
 
 printf("Got to 1 NUMPORTS %d\n", NUMPORTS);
-/*
+
    while ((option = getopt(argc, argv, "vl:r:p:k:h")) != EOF) {
       switch (option) {
       case 'v':
@@ -88,7 +91,7 @@ printf("Got to 1 NUMPORTS %d\n", NUMPORTS);
          break;
       }
    }
-*/
+
 printf("Got to 2\n");
    //Zero out saved fds
    FD_ZERO(&readfds_sav);
@@ -126,7 +129,7 @@ printf("Got to 4\n");
 	
    	for(i = 0; i < NUMPORTS; i++) {
 	    printf("i %d\n", i);
-	    if( (newsockfd[i] <=0) && (FD_ISSET(sockfd[i], &readfds)) ){
+	    if( (newsockfd[i] <= 0) && (FD_ISSET(sockfd[i], &readfds)) ){
 		printf("Trying accept for %s(%d)\n", port[i].portdesc, port[i].portnum);
 		if ((newsockfd[i] = accept(sockfd[i], 
 			(struct sockaddr *) &remote_addr[i], &localaddrlen)) <= 0) {
@@ -141,9 +144,10 @@ printf("Got to 4\n");
 			FD_SET(newsockfd[i], &writefds_sav);
 			if(newsockfd[i] > maxfd) maxfd = newsockfd[i];
 	   }	
-	   if( FD_ISSET(newsockfd[i], &readfds) ) {
-		memset(buf, 0, BUFSIZE);
-		if ((retval = read(newsockfd[i], buf, BUFSIZE)) < 0) {
+	   if( (newsockfd[i] > 0) && FD_ISSET(newsockfd[i], &readfds) ) {
+		memset(buf[i], 0, BUFSIZE);
+		printf("Trying read for %s(%d)\n", port[i].portdesc, port[i].portnum);
+		if ((retval = read(newsockfd[i], buf[i], BUFSIZE)) <= 0) {
 		   	sprintf(tempstr2, "read failed for %s(%d)", port[i].portdesc, port[i].portnum);
 			perror(tempstr2);
 			FD_CLR(newsockfd[i], &readfds_sav);
@@ -168,9 +172,9 @@ printf("Got to 4\n");
 	    		}
 	    	}
         	else {
-			printf("Read succeeded for %s\n", port[i].portdesc);
+			printf("Read succeeded for %s(%d)\n", port[i].portdesc, port[i].portdesc);
 			for(j=0; j<retval; j++)
-			    printf("%hhx ", buf[j]);
+			    printf("%hhx ", buf[i][j]);
 			printf("\n");
 	  	}
 	  }
@@ -178,8 +182,14 @@ printf("Got to 4\n");
    	for(i = 0; i < NUMPORTS; i++) {
 	    if( (newsockfd[i] >0) && (FD_ISSET(newsockfd[i], &writefds)) ){
 		printf("Trying write for %s(%d)\n", port[i].portdesc, port[i].portnum);
-		if( (write(newsockfd[i], &buf[0], retval)) != retval )
-			fprintf(stderr, "partial/failed write\n");
+		if(port[i].outport[0] != NULL) {
+			for(j = 0; j < NUMOUTPORTS; j++) {
+				if( (write(port[i].outport[j], &buf[i][0], retval)) != retval ) {
+		   			sprintf(tempstr2, "write failed for %s(%d)", port[i].portdesc, port[i].portnum);
+					perror(tempstr2);
+				}
+			}
+		}
 	    }
 	}
     sleep(1);
