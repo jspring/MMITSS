@@ -6,10 +6,13 @@ The Data Manager has 3 principal tasks.
 
 Startup
 	Create database for all requested modules (each struct must have acquisition AND usage TSs).
-	Open socket & try to accept connections from all clients
+	Open (Unix domain) socket & try to accept connections from all clients
 	
 
 while
 	Try to accept connections from clients that did not connect at startup
 	Receive and ts incoming data
 	Push outgoing data
+	Needs map of message destinations
+	Needs message sizes and some means of verifying message content, so 
+	that we "know" that a given message is going to the correct destination
