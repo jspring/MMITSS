@@ -7,8 +7,7 @@
 #include <time.h>
 #include <sys/time.h>
 #include <signal.h>
-
-typedef int bool_typ;
+#include <local.h>
 
 /** 
  * posix_timer_type
