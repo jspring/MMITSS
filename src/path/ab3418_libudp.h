@@ -47,6 +47,6 @@ int check_and_reconnect_serial(int retval, int *fpin, int *fpout, char *port);
 extern int set_timing(db_timing_set_2070_t *db_timing_set_2070, int *msg_len, int fpin, int fpout, char verbose);
 extern int print_status(get_long_status8_resp_mess_typ *status);
 extern void fcs_hdlc(int msg_len, void *msgbuf, char verbose);
-extern int get_spat(int wait_for_data, raw_signal_status_msg_t *praw_signal_status_msg, int fpin, int fpout, char verbose, char print_packed_binary);
+extern int get_spat(int wait_for_data, raw_signal_status_msg_t *praw_signal_status_msg, int fpin, char verbose, char print_packed_binary);
 
 #endif

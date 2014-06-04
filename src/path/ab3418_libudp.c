@@ -46,11 +46,12 @@ int get_status(int wait_for_data, gen_mess_typ *readBuff, int fpin, int fpout, c
 int get_overlap(int wait_for_data, gen_mess_typ *readBuff, int fpin, int fpout, char verbose);
 int set_overlap(overlap_msg_t *overlap_set_request, int fpin, int fpout, char verbose);
 int get_special_flags(int wait_for_data, gen_mess_typ *readBuff, int fpin, int fpout, char verbose);
-int get_spat(int wait_for_data, raw_signal_status_msg_t *praw_signal_status_msg, int fpin, int fpout, char verbose, char print_packed_binary);
+int get_spat(int wait_for_data, raw_signal_status_msg_t *praw_signal_status_msg, int fpin, char verbose, char print_packed_binary);
 int set_special_flags(get_set_special_flags_t *special_flags, int fpin, int fpout, char verbose);
 void fcs_hdlc(int msg_len, void *msgbuf, char verbose);
 int get_short_status(int wait_for_data, gen_mess_typ *readBuff, int fpin, int fpout, char verbose);
 int get_request(unsigned char msg_type, unsigned char page, unsigned char block, int fpout, char verbose);
+int spat2battelle(raw_signal_status_msg_t *ca_spat, spat_ntcip_mib_t *battelle_spat, phase_status_t *phase_status, phase_timing_t *phase_timing[8]);
 
 char *timing_strings[] = {
         "Walk_1",
@@ -235,13 +236,16 @@ bool_typ ser_driver_read( gen_mess_typ *pMessagebuff, int fpin, char verbose)
 				}
 			}
 		}
+
 	
 		memcpy( pMessagebuff->data, &msgbuf[0], 100);
 	
 		oldfcs = ~(msgbuf[i-2] << 8) | ~msgbuf[i-1];
 		newfcs = pppfcs( oldfcs, &msgbuf[1], i-1 );
-		if(verbose != 0) 
+		if(verbose != 0){ 
 			printf("newfcs=%x\n",newfcs);
+			fflush(stdout);
+		}
 		if ( newfcs != 0xf0b8 ) {
 			printf( "FCS error, msg type %x\n", msgbuf[4] );
 			return (FALSE);
@@ -766,7 +770,7 @@ int get_status(int wait_for_data, gen_mess_typ *readBuff, int fpin, int fpout, c
 	return 0;
 }
 
-int get_spat(int wait_for_data, raw_signal_status_msg_t *praw_signal_status_msg, int fpin, int fpout, char verbose, char print_packed_binary) {
+int get_spat(int wait_for_data, raw_signal_status_msg_t *praw_signal_status_msg, int fpin, char verbose, char print_packed_binary) {
         fd_set readfds;
         int selectval = 1000;
         struct timeval timeout;
@@ -1171,13 +1175,11 @@ int check_and_reconnect_serial(int retval, int *fpin, int *fpout, char *port) {
 			*fpin = 0;
 			*fpout = 0;
 			while(*fpin <= 0) {
-				sprintf(port, "/dev/ttyUSB%d", (j % 8));
 				fprintf(stderr,"check_and_reconnect 3: Trying to open %s\n", port);
 				*fpin = open( port,  O_RDONLY );
 				if ( *fpin <= 0 ) {
 					perror("check_and_reconnect_serial 4: serial inport open");
 					fprintf(stderr, "check_and_reconnect_serial 5:Error opening device %s for input\n", port );
-					j++;
 				}
 				sleep(1);
 			}
@@ -1201,7 +1203,6 @@ int check_and_reconnect_serial(int retval, int *fpin, int *fpout, char *port) {
 				fprintf(stderr,"check_and_reconnect_serial 2: Initial RS232 connection. Will try to connect...\n");
 			*fpin = 0;
 			while(*fpin <= 0) {
-				sprintf(port, "/dev/ttyS%d", (j % 2));
 				fprintf(stderr,"check_and_reconnect 3: Trying to open %s\n", port);
 				*fpin = open( port,  O_RDONLY );
 				j++;
@@ -1403,6 +1404,7 @@ int spat2battelle(raw_signal_status_msg_t *ca_spat, spat_ntcip_mib_t *battelle_s
 	battelle_spat->PhaseStatusYellow = phase_status->yellows;
 	battelle_spat->PhaseStatusGreens = phase_status->greens;
 
+
 /* Calculation of "Time to change":
 **	Red->Green, active phase = 1, nonactive phase = 4
 **	Ring_A = 1,2,3,4 Ring_B = 5,6,7,8
@@ -1411,19 +1413,52 @@ int spat2battelle(raw_signal_status_msg_t *ca_spat, spat_ntcip_mib_t *battelle_s
 	    for(i=0; i<8; i++) {
 		j = 1 << i;
 		battelle_spat->time_to_change[i].phase = i + 1;
+
+printf("spat2battelle: active_phase %#hhx next_phase %#hhx intvlA %#hhx intvlB %#hhx timerA %hhu timerB %hhu veh_call %#hhx master clock %hhu\n",
+	ca_spat->active_phase,
+	ca_spat->next_phase ,
+	ca_spat->interval_A ,
+	ca_spat-> interval_B,
+	ca_spat-> intvA_timer,
+	ca_spat-> intvB_timer,
+	ca_spat-> veh_call,
+	ca_spat-> master_cycle_clock
+);
+
 		if(ca_spat->active_phase & j) { //Active phase calculations
 			battelle_spat->time_to_change[i].VehMinTimeToChange = (i<4) ? ca_spat->intvA_timer : ca_spat->intvB_timer;
 		}
 		else {
 		    Max_Green[i] = (ca_spat->veh_call & j) ? (phase_timing[i]->max_green1 + phase_timing[i]->min_green) : 0;
-		    Min_Green[i] = (ca_spat->veh_call & j) ? (phase_timing[i]->max_green1 + phase_timing[i]->min_green) : 0;
+		    Min_Green[i] = (ca_spat->veh_call & j) ? (phase_timing[i]->add_per_veh/10 + phase_timing[i]->min_green) : 0;
+printf("veh_call %#hhx max_green1[%d] %hhu min_green[%d] %hhu add_per_veh[%d] %hhu Max_Green[%d] %hu Min_Green[%d] %hhu\n",
+	ca_spat->veh_call,
+	i+1,
+	phase_timing[i]->max_green1,
+	i+1,
+	phase_timing[i]->min_green,
+	i+1,
+	phase_timing[i]->add_per_veh/10,
+	i+1,
+	Max_Green[i],
+	i+1,
+	Min_Green[i]
+);
 		}
 	    }
-	battelle_spat->time_to_change[i].VehMaxTimeToChange = 
+
+	battelle_spat->time_to_change[3].VehMaxTimeToChange = 
 		max(Max_Green[0], Max_Green[4]) + max(phase_timing[0]->yellow, phase_timing[4]->yellow) + max(phase_timing[0]->all_red, phase_timing[4]->all_red) +
 		max(Max_Green[1], Max_Green[5]) + max(phase_timing[1]->yellow, phase_timing[5]->yellow) + max(phase_timing[1]->all_red, phase_timing[5]->all_red) +
 		max(Max_Green[2], Max_Green[6]) + max(phase_timing[2]->yellow, phase_timing[6]->yellow) + max(phase_timing[2]->all_red, phase_timing[6]->all_red);
 	}
 
 
+printf("spat2battelle: Got to 5 Max_Green[0] %d Max_Green[4] %d battelle_spat->time_to_change[3] %d\n",
+	Max_Green[0],
+	Max_Green[4],
+	battelle_spat->time_to_change[3].VehMaxTimeToChange
+);
+
+	return 0;
 }

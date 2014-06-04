@@ -8,8 +8,9 @@
 #include "ab3418commudp.h"
 //#include "urms.h"
 #include <udp_utils.h>
+#include "Battelle_SPaT_MIB.h"
 
-#define MAX_PHASES	7
+#define MAX_PHASES	8
 #define TRAFFICCTLPORT	5300
 
 static jmp_buf exit_env;
@@ -32,6 +33,7 @@ static int sig_list[] =
 
 int OpenTSCPConnection(char *controllerIP, char *port);
 int process_phase_status( get_long_status8_resp_mess_typ *pstatus, int verbose, unsigned char greens, phase_status_t *pphase_status);
+extern int spat2battelle(raw_signal_status_msg_t *ca_spat, spat_ntcip_mib_t *battelle_spat, phase_status_t *phase_status, phase_timing_t *phase_timing[8]);
 
 int main(int argc, char *argv[]) {
 
@@ -39,8 +41,10 @@ int main(int argc, char *argv[]) {
 
         struct sockaddr_in snd_addr;    /// used in sendto call
 	int i;
-	int fpin = 0;
-	int fpout = 0;
+	int ab3418_fdin = 0;
+	int ab3418_fdout = 0;
+	int ca_spat_fdin = 0;
+	int ca_spat_fdout = 0;
 	int trafficctlfd = 0;
 	char trafficctlreadbuf[1000];
 	int len;
@@ -49,12 +53,15 @@ int main(int argc, char *argv[]) {
 	int wait_for_data = 1;
 	gen_mess_typ readBuff;
 	phase_timing_t phase_timing[MAX_PHASES];
+	phase_timing_t *pphase_timing[MAX_PHASES];
 	raw_signal_status_msg_t raw_signal_status_msg;
+	spat_ntcip_mib_t battelle_spat;
 	db_timing_set_2070_t db_timing_set_2070;
 	db_timing_get_2070_t db_timing_get_2070;
 	int retval;
 	int check_retval;
-	char port[14] = "/dev/ttyS0";
+	char ab3418_port[20] = "/dev/ttyS0";
+	char ca_spat_port[20] = "/dev/ttyS1";
 	char strbuf[300];
 	struct sockaddr_storage trafficctl_addr;
 
@@ -87,13 +94,17 @@ int main(int argc, char *argv[]) {
         char *udp_name = NULL;  /// address of UDP destination
         int bytes_sent;         /// returned from sendto
  
-        while ((opt = getopt(argc, argv, "p:uvi:cnd:a:bho:s:")) != -1)
+        while ((opt = getopt(argc, argv, "A:S:uvi:cnd:a:bho:s:")) != -1)
         {
                 switch (opt)
                 {
-                  case 'p':
-			memset(port, 0, sizeof(port));
-                        strncpy(&port[0], optarg, 13);
+                  case 'A':
+			memset(ab3418_port, 0, sizeof(ab3418_port));
+                        strncpy(&ab3418_port[0], optarg, 16);
+                        break;
+                  case 'S':
+			memset(ca_spat_port, 0, sizeof(ca_spat_port));
+                        strncpy(&ca_spat_port[0], optarg, 16);
                         break;
                   case 'u':
                         use_db = 1;
@@ -121,7 +132,7 @@ int main(int argc, char *argv[]) {
                         break;
 		  case 'h':
 		  default:
-			fprintf(stderr, "Usage: %s -p <port, (def. /dev/ttyS0)> -u (use db) -v (verbose) -i <loop interval> -b (output binary SPaT message) -s <UDP unicast destination> -o <UDP unicast port>\n", argv[0]);
+			fprintf(stderr, "Usage: %s -A <AB3418 port, (def. /dev/ttyS0)> -S <CA SPaT port, (def. /dev/ttyS1) -v (verbose) -i <loop interval> -b (output binary SPaT message) -s <UDP unicast destination> -o <UDP unicast port>\n", argv[0]);
 			exit(EXIT_FAILURE);
 		}
 	}
@@ -130,6 +141,8 @@ int main(int argc, char *argv[]) {
 	memset(&db_timing_set_2070, 0, sizeof(db_timing_set_2070));
 	memset(&raw_signal_status_msg, 0, sizeof(raw_signal_status_msg));
 	memset(&snd_addr, 0, sizeof(snd_addr));
+	for(i=0; i<MAX_PHASES; i++) 
+		pphase_timing[i] = &phase_timing[i];
 
 	if ((ptmr = timer_init( interval, 0)) == NULL) {
 		fprintf(stderr, "Unable to initialize delay timer\n");
@@ -157,9 +170,48 @@ int main(int argc, char *argv[]) {
 	}
 
         /* Initialize serial port. */
-	check_retval = check_and_reconnect_serial(0, &fpin, &fpout, port);
+	check_retval = check_and_reconnect_serial(0, &ab3418_fdin, &ab3418_fdout, ab3418_port);
+	check_retval = check_and_reconnect_serial(0, &ca_spat_fdin, &ca_spat_fdout, ca_spat_port);
+		if (setjmp(exit_env) != 0) {
+
+			if(retval < 0) 
+				check_retval = check_and_reconnect_serial(retval, &ab3418_fdin, &ab3418_fdout, ab3418_port);
+				check_retval = check_and_reconnect_serial(retval, &ca_spat_fdin, &ca_spat_fdout, ca_spat_port);
+                	if(ab3418_fdin)
+                       		close(ab3418_fdin);
+                	if(ab3418_fdout)
+                       		close(ab3418_fdout);
+                	if(ca_spat_fdin)
+                       		close(ca_spat_fdin);
+                	if(ca_spat_fdout)
+                       		close(ca_spat_fdout);
+			exit(EXIT_SUCCESS);
+		} else {
+printf("ab3418commudp: Got to 6\n");
+//			sig_ign(sig_list, sig_hand);
+printf("ab3418commudp: Got to 7\n");
+		}
+
+printf("ab3418commudp: Got to 8\n");
+
+	if ((ptmr = timer_init( interval, 0)) == NULL) {
+		fprintf(stderr, "Unable to initialize delay timer\n");
+		exit(EXIT_FAILURE);
+	}
+
+	printf("main 1: getting timing settings before infinite loop\n");
+	for(i=0; i<MAX_PHASES; i++) {
+		db_timing_get_2070.phase = i+1;	
+		db_timing_get_2070.page = 0x100; //phase timing page	
+		retval = get_timing(&db_timing_get_2070, wait_for_data, &phase_timing[i], &ab3418_fdin, &ab3418_fdout, verbose);
+// Instead of db_clt_write here, the phase timing maybe should be sent to another process via udp?
+//		db_clt_write(pclt, DB_PHASE_1_TIMING_VAR + i, sizeof(phase_timing_t), &phase_timing[i]);
+		usleep(500000);
+	}
+
 while(1) {
-	retval = get_spat(wait_for_data, &raw_signal_status_msg, fpin, fpout, verbose, output_spat_binary);
+	retval = get_spat(wait_for_data, &raw_signal_status_msg, ca_spat_fdin, verbose, output_spat_binary);
+	retval = spat2battelle(&raw_signal_status_msg, &battelle_spat, &phase_status, pphase_timing);
 	snd_addr.sin_port = temp_port;
 	snd_addr.sin_addr.s_addr = temp_addr;
 	if(output_spat_binary) {
@@ -231,46 +283,18 @@ while(1) {
 }
 	exit(EXIT_SUCCESS);
 
-		if (setjmp(exit_env) != 0) {
-
-			if(retval < 0) 
-				check_retval = check_and_reconnect_serial(retval, &fpin, &fpout, port);
-                	if(fpin)
-                       		close(fpin);
-                	if(fpout)
-                       		close(fpout);
-			exit(EXIT_SUCCESS);
-		} else
-			sig_ign(sig_list, sig_hand);
-
-
-	if ((ptmr = timer_init( interval, 0)) == NULL) {
-		fprintf(stderr, "Unable to initialize delay timer\n");
-		exit(EXIT_FAILURE);
-	}
-
-	printf("main 1: getting timing settings before infinite loop\n");
-	for(i=0; i<MAX_PHASES; i++) {
-		db_timing_get_2070.phase = i+1;	
-		db_timing_get_2070.page = 0x100; //phase timing page	
-		retval = get_timing(&db_timing_get_2070, wait_for_data, &phase_timing[i], &fpin, &fpout, verbose);
-// Instead of db_clt_write here, the phase timing maybe should be sent to another process via udp?
-//		db_clt_write(pclt, DB_PHASE_1_TIMING_VAR + i, sizeof(phase_timing_t), &phase_timing[i]);
-		usleep(500000);
-	}
-
 	while(1) {
 		if( (retval = recvfrom(trafficctlfd, trafficctlreadbuf, sizeof(trafficctlreadbuf), 0,
 			(struct sockaddr *)&trafficctl_addr, (socklen_t *)&len)) > 0) {
 			printf("Hallelujah, I got %d bytes!\n", retval);
 			if(no_control == 0) {
-//				retval = set_timing(&db_timing_set_2070, &msg_len, fpin, fpout, verbose);
+//				retval = set_timing(&db_timing_set_2070, &msg_len, ab3418_fdin, ab3418_fdout, verbose);
 			}
 		}
 		else {	
-			retval = get_status(wait_for_data, &readBuff, fpin, fpout, verbose);
+			retval = get_status(wait_for_data, &readBuff, ab3418_fdin, ab3418_fdout, verbose);
 			if(retval < 0) 
-				check_retval = check_and_reconnect_serial(retval, &fpin, &fpout, port);
+				check_retval = check_and_reconnect_serial(retval, &ab3418_fdin, &ab3418_fdout, ab3418_port);
 			if(use_db && (retval == 0) ) {
 // Should this be a udp send?	db_clt_write(pclt, DB_TSCP_STATUS_VAR, sizeof(get_long_status8_resp_mess_typ), (get_long_status8_resp_mess_typ *)&readBuff);
 				retval = process_phase_status( (get_long_status8_resp_mess_typ *)&readBuff, verbose, greens, &phase_status);
@@ -287,9 +311,9 @@ while(1) {
 				if(retval < 0) 
 					printf("get_status returned negative value: %d\n", retval);
 			usleep(80000);
-			retval = get_short_status(wait_for_data, &readBuff, fpin, fpout, verbose);
+			retval = get_short_status(wait_for_data, &readBuff, ab3418_fdin, ab3418_fdout, verbose);
 			if(retval < 0) 
-				check_retval = check_and_reconnect_serial(retval, &fpin, &fpout, port);
+				check_retval = check_and_reconnect_serial(retval, &ab3418_fdin, &ab3418_fdout, ab3418_port);
 			if(use_db && (retval == 0) ) {
 			    greens = readBuff.data[5];	
 			    if(verbose) 
@@ -453,7 +477,7 @@ int process_phase_status( get_long_status8_resp_mess_typ *pstatus, int verbose, 
 }	
 
 /*
-int get_detector(int wait_for_data, gen_mess_typ *readBuff, int fpin, int fpout, char detector, char verbose) {
+int get_detector(int wait_for_data, gen_mess_typ *readBuff, int ab3418_fdin, int ab3418_fdout, char detector, char verbose) {
         int msg_len;
         fd_set readfds;
         fd_set writefds;
@@ -481,16 +505,16 @@ int get_detector(int wait_for_data, gen_mess_typ *readBuff, int fpin, int fpout,
         fcs_hdlc(msg_len, &detector_get_request, verbose);
 
         FD_ZERO(&writefds);
-        FD_SET(fpout, &writefds);
+        FD_SET(ab3418_fdout, &writefds);
         timeout.tv_sec = 1;
         timeout.tv_usec = 0;
-        if( (selectval = select(fpout+1, NULL, &writefds, NULL, &timeout)) <=0) {
+        if( (selectval = select(ab3418_fdout+1, NULL, &writefds, NULL, &timeout)) <=0) {
                 perror("select 56");
-                outportisset = (FD_ISSET(fpout, &writefds)) == 0 ? "no" : "yes";
-                printf("get_detector 2: fpout %d selectval %d outportisset %s\n", fpout, selectval, outportisset);
+                outportisset = (FD_ISSET(ab3418_fdout, &writefds)) == 0 ? "no" : "yes";
+                printf("get_detector 2: ab3418_fdout %d selectval %d outportisset %s\n", ab3418_fdout, selectval, outportisset);
                 return -3;
         }
-        write ( fpout, &detector_get_request, msg_len+4 );
+        write ( ab3418_fdout, &detector_get_request, msg_len+4 );
         fflush(NULL);
         sleep(2);
 
@@ -499,27 +523,27 @@ int get_detector(int wait_for_data, gen_mess_typ *readBuff, int fpin, int fpout,
 
         if(wait_for_data && readBuff) {
                 FD_ZERO(&readfds);
-                FD_SET(fpin, &readfds);
+                FD_SET(ab3418_fdin, &readfds);
                 timeout.tv_sec = 1;
                 timeout.tv_usec = 0;
-                if( (selectval = select(fpin+1, &readfds, NULL, NULL, &timeout)) <=0) {
+                if( (selectval = select(ab3418_fdin+1, &readfds, NULL, NULL, &timeout)) <=0) {
                         perror("select 57");
-                        inportisset = (FD_ISSET(fpin, &readfds)) == 0 ? "no" : "yes";
-                        printf("get_detector 3: fpin %d selectval %d inportisset %s\n", fpin, selectval, inportisset);
+                        inportisset = (FD_ISSET(ab3418_fdin, &readfds)) == 0 ? "no" : "yes";
+                        printf("get_detector 3: ab3418_fdin %d selectval %d inportisset %s\n", ab3418_fdin, selectval, inportisset);
                         return -2;
                 }
-                ser_driver_retval = ser_driver_read(readBuff, fpin, verbose);
+                ser_driver_retval = ser_driver_read(readBuff, ab3418_fdin, verbose);
                 if(ser_driver_retval == 0) {
                         printf("get_detector 4: Lost USB connection\n");
                         return -1;
                 }
         }
         if(verbose != 0)
-                printf("get_detector 5-end: fpin %d selectval %d inportisset %s fpout %d selectval %d outportisset %s ser_driver_retval %d\n", fpin, selectval, inportisset, fpout, selectval, outportisset, ser_driver_retval);
+                printf("get_detector 5-end: ab3418_fdin %d selectval %d inportisset %s ab3418_fdout %d selectval %d outportisset %s ser_driver_retval %d\n", ab3418_fdin, selectval, inportisset, ab3418_fdout, selectval, outportisset, ser_driver_retval);
         return 0;
 }
 
-int set_detector(detector_msg_t *pdetector_set_request, int fpin, int fpout, char detector, char verbose) {
+int set_detector(detector_msg_t *pdetector_set_request, int ab3418_fdin, int ab3418_fdout, char detector, char verbose) {
         int msg_len;
         fd_set readfds;
         fd_set writefds;
@@ -559,39 +583,39 @@ for(i=0; i<sizeof(detector_msg_t); i++)
 printf("\n");
 
         FD_ZERO(&writefds);
-        FD_SET(fpout, &writefds);
+        FD_SET(ab3418_fdout, &writefds);
         timeout.tv_sec = 1;
         timeout.tv_usec = 0;
-        if( (selectval = select(fpout+1, NULL, &writefds, NULL, &timeout)) <=0) {
+        if( (selectval = select(ab3418_fdout+1, NULL, &writefds, NULL, &timeout)) <=0) {
                 perror("select 14");
-                outportisset = (FD_ISSET(fpout, &writefds)) == 0 ? "no" : "yes";
-                printf("set_detector 2: fpout %d selectval %d outportisset %s\n", fpout, selectval, outportisset);
+                outportisset = (FD_ISSET(ab3418_fdout, &writefds)) == 0 ? "no" : "yes";
+                printf("set_detector 2: ab3418_fdout %d selectval %d outportisset %s\n", ab3418_fdout, selectval, outportisset);
                 return -3;
         }
-        write ( fpout, pdetector_set_request, sizeof(detector_msg_t));
+        write ( ab3418_fdout, pdetector_set_request, sizeof(detector_msg_t));
         fflush(NULL);
         sleep(2);
 
         ser_driver_retval = 100;
         if(wait_for_data) {
                 FD_ZERO(&readfds);
-                FD_SET(fpin, &readfds);
+                FD_SET(ab3418_fdin, &readfds);
                 timeout.tv_sec = 1;
                 timeout.tv_usec = 0;
-                if( (selectval = select(fpin+1, &readfds, NULL, NULL, &timeout)) <=0) {
+                if( (selectval = select(ab3418_fdin+1, &readfds, NULL, NULL, &timeout)) <=0) {
                         perror("select 15");
-                        inportisset = (FD_ISSET(fpin, &readfds)) == 0 ? "no" : "yes";
-                        printf("set_detector 3: fpin %d selectval %d inportisset %s\n", fpin, selectval, inportisset);
+                        inportisset = (FD_ISSET(ab3418_fdin, &readfds)) == 0 ? "no" : "yes";
+                        printf("set_detector 3: ab3418_fdin %d selectval %d inportisset %s\n", ab3418_fdin, selectval, inportisset);
                         return -2;
                 }
-                ser_driver_retval = ser_driver_read(&readBuff, fpin, verbose);
+                ser_driver_retval = ser_driver_read(&readBuff, ab3418_fdin, verbose);
                 if(ser_driver_retval == 0) {
                         printf("set_detector 4: Lost USB connection\n");
                         return -1;
                 }
         }
         if(verbose != 0)
-                printf("set_detector 5-end: fpin %d selectval %d inportisset %s fpout %d selectval %d outportisset %s ser_driver_retval %d\n", fpin, selectval, inportisset, fpout, selectval, outportisset, ser_driver_retval);
+                printf("set_detector 5-end: ab3418_fdin %d selectval %d inportisset %s ab3418_fdout %d selectval %d outportisset %s ser_driver_retval %d\n", ab3418_fdin, selectval, inportisset, ab3418_fdout, selectval, outportisset, ser_driver_retval);
         return 0;
 }
 */
