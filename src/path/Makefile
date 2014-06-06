@@ -3,25 +3,32 @@
 #
 # Copyright (c) 2008   Regents of the University of California
 #
-include $(CAPATH_MK_DEFS)
 
 SERVER_LIB = $(OBJDIR)/libserver_lib.a
 SERVER_LIB_OBJS = $(OBJDIR)/server_lib.o
 
-PATH_LIBS = -lserver_lib -ldl $(PATH_CORE_LIBS)
+PATH_LIBS = -lserver_lib -ldl -lrt
 PATH_LDFLAGS += -L./lnx
 PATH_CFLAGS += -I$(ATSC_INC_DIR) -pg
+PATH_OBJS = $(OBJDIR)/timestamp.o \
+	$(OBJDIR)/sys_rt_linux.o \
+	$(OBJDIR)/ab3418_libudp.o \
+	$(OBJDIR)/udp_utils.o
 
-HDRS = fcs.h msgs.h ab3418comm.h ab3418_lib.h server_lib.h set_min_max_green.h
+OBJDIR = lnx
 
-EXEC = $(OBJDIR)/data_manager $(OBJDIR)/server $(OBJDIR)/client
+EXEC = $(OBJDIR)/data_manager $(OBJDIR)/server $(OBJDIR)/client $(OBJDIR)/ab3418commudp
 
-all: $(OBJDIR) $(SERVER_LIB) $(EXEC) 
+all: $(OBJDIR) $(SERVER_LIB) $(PATH_OBJS) $(EXEC) 
 
-$(EXEC): $(SERVER_LIB_OBJS)
+$(OBJDIR)/%.o: %.c
+	gcc -c -DGNU_SOURCE -Wall -pg -I. $*.c -o $@
+
+.o: $(SERVER_LIB_OBJS)
+	gcc -L./lnx -o $@ $@.o $(PATH_OBJS) $(PATH_LIBS)
 
 $(SERVER_LIB): $(SERVER_LIB_OBJS)
-	$(PATH_AR) $(PATH_AR_FLAGS) $@ $(SERVER_LIB_OBJS)
+	ar -rv $@ $(SERVER_LIB_OBJS) 
 
 $(OBJDIR):
 	mkdir -p $(OBJDIR)
