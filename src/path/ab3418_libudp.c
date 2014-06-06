@@ -51,7 +51,7 @@ int set_special_flags(get_set_special_flags_t *special_flags, int fpin, int fpou
 void fcs_hdlc(int msg_len, void *msgbuf, char verbose);
 int get_short_status(int wait_for_data, gen_mess_typ *readBuff, int fpin, int fpout, char verbose);
 int get_request(unsigned char msg_type, unsigned char page, unsigned char block, int fpout, char verbose);
-int spat2battelle(raw_signal_status_msg_t *ca_spat, spat_ntcip_mib_t *battelle_spat, phase_status_t *phase_status, phase_timing_t *phase_timing[8]);
+int spat2battelle(raw_signal_status_msg_t *ca_spat, spat_ntcip_mib_t *battelle_spat, phase_timing_t *phase_timing[8], int verbose);
 
 char *timing_strings[] = {
         "Walk_1",
@@ -1388,77 +1388,116 @@ readBuff->data[5] = 0xff;
 #define FREE	1
 #define max(x, y)	((x) > (y) ? (x) : (y))
 
-int spat2battelle(raw_signal_status_msg_t *ca_spat, spat_ntcip_mib_t *battelle_spat, phase_status_t *phase_status, phase_timing_t *phase_timing[8]) {
+int spat2battelle(raw_signal_status_msg_t *ca_spat, spat_ntcip_mib_t *battelle_spat, phase_timing_t *phase_timing[8], int verbose) {
 
 	unsigned char Max_Green[8];
 	unsigned char Min_Green[8];
 	int i;
 	int j;
 	int Coord_plan = FREE;
+	unsigned char interval_divisor[] = {10,10,10,10,1,1,1,1,10,10,10,10,10,10,10,10};
+	unsigned char greens[] =  { 1, 0, 1, 0, 1, 1, 1, 1, 0, 0, 0, 0, 0, 0, 0, 0};
+	unsigned char yellows[] = { 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 1, 0, 0};
+	unsigned char walks[] = { 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0};
+	unsigned char flash_dont_walks[] = { 0, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0};
+	unsigned char interval;
+	timestamp_t ts;
+	int tstemp;
 
 	memset(battelle_spat, 0, sizeof(spat_ntcip_mib_t));
 
 	battelle_spat->msg_id = 0xcd;
 	battelle_spat->num_phases = 16;
-	battelle_spat->PhaseStatusReds = phase_status->reds;
-	battelle_spat->PhaseStatusYellow = phase_status->yellows;
-	battelle_spat->PhaseStatusGreens = phase_status->greens;
+	battelle_spat->TimebaseAscActionStatus = ca_spat->plan_num;
+	if(ca_spat->preempt != 0) 
+		battelle_spat->IntersectionStatus |= 0x04;
+	get_current_timestamp(&ts);
+	tstemp = (3600 * ts.hour) + (60 * ts.min) + ts.sec;
+	battelle_spat->SystemSeconds[0] = (tstemp & 0xff);
+	battelle_spat->SystemSeconds[1] = (tstemp >> 8) & 0xff;
+	battelle_spat->SystemSeconds[2] = (tstemp >> 16) & 0xff;
+	battelle_spat->SystemMilliSeconds = ts.millisec;
 
 
 /* Calculation of "Time to change":
 **	Red->Green, active phase = 1, nonactive phase = 4
 **	Ring_A = 1,2,3,4 Ring_B = 5,6,7,8
 */
-	if(Coord_plan == FREE) {
+	if(verbose) {
+		printf("spat2battelle: active_phase %#hhx next_phase %#hhx intvlA %#hhx intvlB %#hhx timerA %hhu timerB %hhu veh_call %#hhx master clock %hhu\n",
+			ca_spat->active_phase,
+			ca_spat->next_phase ,
+			ca_spat->interval_A ,
+			ca_spat-> interval_B,
+			ca_spat-> intvA_timer,
+			ca_spat-> intvB_timer,
+			ca_spat-> veh_call,
+			ca_spat-> master_cycle_clock
+		);
+	}
+
+    if(Coord_plan == FREE) {
 	    for(i=0; i<8; i++) {
 		j = 1 << i;
 		battelle_spat->time_to_change[i].phase = i + 1;
 
-printf("spat2battelle: active_phase %#hhx next_phase %#hhx intvlA %#hhx intvlB %#hhx timerA %hhu timerB %hhu veh_call %#hhx master clock %hhu\n",
-	ca_spat->active_phase,
-	ca_spat->next_phase ,
-	ca_spat->interval_A ,
-	ca_spat-> interval_B,
-	ca_spat-> intvA_timer,
-	ca_spat-> intvB_timer,
-	ca_spat-> veh_call,
-	ca_spat-> master_cycle_clock
-);
 
 		if(ca_spat->active_phase & j) { //Active phase calculations
 			battelle_spat->time_to_change[i].VehMinTimeToChange = (i<4) ? ca_spat->intvA_timer : ca_spat->intvB_timer;
+			interval = (i<4) ? ca_spat->interval_A : ca_spat->interval_B;
+			battelle_spat->PhaseStatusYellow |= (yellows[interval] << i);
+			battelle_spat->PhaseStatusGreens |= (greens[interval] << i);
+			battelle_spat->PhaseStatusReds = ~(battelle_spat->PhaseStatusYellow | battelle_spat->PhaseStatusGreens);
+			battelle_spat->PhaseStatusWalks |= (walks[interval] << i);
+			battelle_spat->PhaseStatusPedClears |= battelle_spat->PhaseStatusWalks | (flash_dont_walks[interval] << i);
+			battelle_spat->PhaseStatusDontWalks = ~battelle_spat->PhaseStatusPedClears;
+			if(verbose)
+				printf("\n\nPhase %d VehMinTimeToChange %hu intrvl %#hhx veh_call %#hhx ped_call %#hhx\n\n", i+1, battelle_spat->time_to_change[i].VehMinTimeToChange/interval_divisor[interval], interval, ca_spat->veh_call, ca_spat->ped_call);
 		}
-		else {
-		    Max_Green[i] = (ca_spat->veh_call & j) ? (phase_timing[i]->max_green1 + phase_timing[i]->min_green) : 0;
-		    Min_Green[i] = (ca_spat->veh_call & j) ? (phase_timing[i]->add_per_veh/10 + phase_timing[i]->min_green) : 0;
-printf("veh_call %#hhx max_green1[%d] %hhu min_green[%d] %hhu add_per_veh[%d] %hhu Max_Green[%d] %hu Min_Green[%d] %hhu\n",
-	ca_spat->veh_call,
-	i+1,
-	phase_timing[i]->max_green1,
-	i+1,
-	phase_timing[i]->min_green,
-	i+1,
-	phase_timing[i]->add_per_veh/10,
-	i+1,
-	Max_Green[i],
-	i+1,
-	Min_Green[i]
-);
+		Max_Green[i] = (ca_spat->veh_call & j) ? (phase_timing[i]->max_green1 + phase_timing[i]->min_green) : 0;
+		Min_Green[i] = (ca_spat->veh_call & j) ? (phase_timing[i]->add_per_veh/10 + phase_timing[i]->min_green) : 0;
+		if(verbose) {
+			printf("veh_call %#hhx max_green1(%d) %hhu yellow(%d) %hhu all-red(%d) %hhu min_green(%d) %hhu add_per_veh(%d) %hhu Max_Green(%d) %hu Min_Green(%d) %hhu\n",
+			ca_spat->veh_call, 
+			i+1, phase_timing[i]->max_green1, 
+			i+1, phase_timing[i]->yellow,
+			i+1, phase_timing[i]->all_red,
+			i+1, phase_timing[i]->min_green,
+			i+1, phase_timing[i]->add_per_veh,
+			i+1, Max_Green[i],
+			i+1, Min_Green[i]
+			);
 		}
+		//This is wrong! The max/min time to change for the CURRENT phase is whatever the counter says.
+		//But this is the beginning of creating a matrix of max/min time to change for each phase.
+		// This calculation creates the max time to change for 
+		battelle_spat->time_to_change[i].VehMaxTimeToChange = 
+		( (10*max(Max_Green[(i+1)%4], Max_Green[(i+1)%8])) + max(phase_timing[(i+1)%4]->yellow, phase_timing[(i+1)%8]->yellow) + max(phase_timing[(i+1)%4]->all_red, phase_timing[(i+1)%8]->all_red) +
+		(10*max(Max_Green[(i+2)%4], Max_Green[(i+2)%8])) + max(phase_timing[(i+2)%4]->yellow, phase_timing[(i+2)%8]->yellow) + max(phase_timing[(i+2)%4]->all_red, phase_timing[(i+2)%8]->all_red) +
+		(10*max(Max_Green[(i+3)%4], Max_Green[(i+3)%8])) + max(phase_timing[(i+3)%4]->yellow, phase_timing[(i+3)%8]->yellow) + max(phase_timing[(i+3)%4]->all_red, phase_timing[(i+3)%8]->all_red) )/10;
+		if(verbose) {
+			printf("spat2battelle: Got to 5 battelle_spat->time_to_change[%d] %d\n",
+				i, battelle_spat->time_to_change[3].VehMaxTimeToChange);
 	    }
-
-	battelle_spat->time_to_change[3].VehMaxTimeToChange = 
-		max(Max_Green[0], Max_Green[4]) + max(phase_timing[0]->yellow, phase_timing[4]->yellow) + max(phase_timing[0]->all_red, phase_timing[4]->all_red) +
-		max(Max_Green[1], Max_Green[5]) + max(phase_timing[1]->yellow, phase_timing[5]->yellow) + max(phase_timing[1]->all_red, phase_timing[5]->all_red) +
-		max(Max_Green[2], Max_Green[6]) + max(phase_timing[2]->yellow, phase_timing[6]->yellow) + max(phase_timing[2]->all_red, phase_timing[6]->all_red);
 	}
+	printf("   PhaseStatusReds %#hx PhaseStatusYellow %#hx PhaseStatusGreens %#hx\n",
+		battelle_spat->PhaseStatusReds,
+		battelle_spat->PhaseStatusYellow,
+		battelle_spat->PhaseStatusGreens
+	);
+	printf("   PhaseStatusDontWalks %#hx PhaseStatusPedClears %#hx PhaseStatusWalks %#hx SystemSeconds %u tstemp %u %hu\n",
+		battelle_spat->PhaseStatusDontWalks,
+		battelle_spat->PhaseStatusPedClears,
+		battelle_spat->PhaseStatusWalks,
+		battelle_spat->SystemSeconds[0]|
+		(battelle_spat->SystemSeconds[1] << 8)|
+		(battelle_spat->SystemSeconds[2] << 16),
+		tstemp,
+		battelle_spat->SystemMilliSeconds
+	);
 
 
-printf("spat2battelle: Got to 5 Max_Green[0] %d Max_Green[4] %d battelle_spat->time_to_change[3] %d\n",
-	Max_Green[0],
-	Max_Green[4],
-	battelle_spat->time_to_change[3].VehMaxTimeToChange
-);
+    }
 
 	return 0;
 }

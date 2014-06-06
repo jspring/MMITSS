@@ -1,14 +1,17 @@
-#include <db_include.h>
+//#include <db_include.h>
+#include "sys_os.h"
 #include <sys/select.h>
+#include <search.h>
 #include "server_lib.h"
 #include "data_manager.h"
+#include "msgs.h"
 
 #define BUFSIZE 1500
 
 typedef struct {
 	char portdesc[100];
 	unsigned short portnum;
-	unsigned short *outport[3];
+	unsigned short outfd[3];
 #define NUMOUTPORTS	3
 } port_t;
 
@@ -16,14 +19,22 @@ port_t port[] = {
 		{"PriorityRequestPort", PRIO_REQ_PORT, {0, 0, 0} },
 		{"TrajectoryAwarePort", TRAJ_AWARE_PORT, {0, 0, 0} },
 		{"NomadicTrajectoryAwarePort", NOMADIC_TRAJ_AWARE_PORT, {0, 0, 0} },
-		{"TrafficControlPort", TRAF_CTL_PORT, {TRAF_CTL_IFACE_PORT, 0, 0} },
-		{"TrafficControlInterfacePort", TRAF_CTL_IFACE_PORT, {TRAF_CTL_PORT, SPAT_BCAST_PORT, 0} },
+		{"TrafficControlPort", TRAF_CTL_PORT, {0, 0, 0} },
+		{"TrafficControlInterfacePort", TRAF_CTL_IFACE_PORT, {0, 0, 0} },
 		{"SpatBroadcastPort", SPAT_BCAST_PORT, {0, 0, 0} },
 		{"PerformanceObserverPort",PERF_OBSRV_PORT, {0, 0, 0} },
 		{"NomadicDevicePort", NOMADIC_DEV_PORT, {0, 0, 0} }
 };
 
 int NUMPORTS = sizeof(port) / sizeof(port_t);
+
+// Array for allocating storage for messages. Hopefully, we can
+// agree on a limit of 256 messages and up to 256 bytes per message.
+// Also it would be nice if the first byte were message ID, the 
+// second byte the size of the message, and bytes 2-6 the millisecond
+// since midnight timestamp.
+struct mmitss_msg_tag { unsigned char size; long *struct_ptr };
+struct mmitss_msg_tag mmitss_msg[256];
 
 int main( int argc, char *argv[]) {
 	int retval;
@@ -54,6 +65,7 @@ int main( int argc, char *argv[]) {
 	int j;
 	char tempstr[] = "Got message!";
 	char tempstr2[100];
+
 
 printf("Got to 0 NUMPORTS %d\n", NUMPORTS);
 
@@ -172,19 +184,25 @@ printf("Got to 4\n");
 	    		}
 	    	}
         	else {
-			printf("Read succeeded for %s(%d)\n", port[i].portdesc, port[i].portdesc);
-			for(j=0; j<retval; j++)
-			    printf("%hhx ", buf[i][j]);
-			printf("\n");
+			printf("Read succeeded for %s(%d)\n", port[i].portdesc, port[i].portnum);
+			if(mmitss_msg[buf[i][0]].struct_ptr == NULL)
+				mmitss_msg[buf[i][0]].struct_ptr = calloc(mmitss_msg[buf[i][0]].size, 1);
+			memcpy(&mmitss_msg[buf[i][0]].struct_ptr, &buf[i][j], mmitss_msg[buf[i][0]].size);
+			if(verbose) {
+				for(j=0; j<retval; j++)
+			    		printf("%hhx ", buf[i][j]);
+				printf("\n");
+			}
+			
 	  	}
 	  }
 	}
    	for(i = 0; i < NUMPORTS; i++) {
 	    if( (newsockfd[i] >0) && (FD_ISSET(newsockfd[i], &writefds)) ){
 		printf("Trying write for %s(%d)\n", port[i].portdesc, port[i].portnum);
-		if(port[i].outport[0] != NULL) {
+		if(port[i].outfd[0] != 0) {
 			for(j = 0; j < NUMOUTPORTS; j++) {
-				if( (write(port[i].outport[j], &buf[i][0], retval)) != retval ) {
+				if( (write(port[i].outfd[j], &buf[i][0], retval)) != retval ) {
 		   			sprintf(tempstr2, "write failed for %s(%d)", port[i].portdesc, port[i].portnum);
 					perror(tempstr2);
 				}

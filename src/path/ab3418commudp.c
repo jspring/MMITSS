@@ -33,7 +33,7 @@ static int sig_list[] =
 
 int OpenTSCPConnection(char *controllerIP, char *port);
 int process_phase_status( get_long_status8_resp_mess_typ *pstatus, int verbose, unsigned char greens, phase_status_t *pphase_status);
-extern int spat2battelle(raw_signal_status_msg_t *ca_spat, spat_ntcip_mib_t *battelle_spat, phase_status_t *phase_status, phase_timing_t *phase_timing[8]);
+extern int spat2battelle(raw_signal_status_msg_t *ca_spat, spat_ntcip_mib_t *battelle_spat, phase_timing_t *phase_timing[8]);
 
 int main(int argc, char *argv[]) {
 
@@ -56,6 +56,7 @@ int main(int argc, char *argv[]) {
 	phase_timing_t *pphase_timing[MAX_PHASES];
 	raw_signal_status_msg_t raw_signal_status_msg;
 	spat_ntcip_mib_t battelle_spat;
+	char *pbattelle_spat;
 	db_timing_set_2070_t db_timing_set_2070;
 	db_timing_get_2070_t db_timing_get_2070;
 	int retval;
@@ -78,6 +79,8 @@ int main(int argc, char *argv[]) {
 	int use_db = 0;
 	int interval = 100;
 	int verbose = 0;
+	int low_battelle = -1;
+	int high_battelle = -1;
 	unsigned char greens = 0;
 	unsigned char no_control = 0;
 //	unsigned char no_control_sav = 0;
@@ -94,7 +97,9 @@ int main(int argc, char *argv[]) {
         char *udp_name = NULL;  /// address of UDP destination
         int bytes_sent;         /// returned from sendto
  
-        while ((opt = getopt(argc, argv, "A:S:uvi:cnd:a:bho:s:")) != -1)
+	pbattelle_spat = (char *)&battelle_spat;
+
+        while ((opt = getopt(argc, argv, "A:S:uvi:na:bo:s:l:h:z")) != -1)
         {
                 switch (opt)
                 {
@@ -130,11 +135,26 @@ int main(int argc, char *argv[]) {
                   case 's':
                         udp_name = strdup(optarg);
                         break;
-		  case 'h':
+                  case 'l':
+                        low_battelle = atoi(optarg);
+                        break;
+                  case 'h':
+                        high_battelle = atoi(optarg);
+                        break;
+		  case 'z':
 		  default:
-			fprintf(stderr, "Usage: %s -A <AB3418 port, (def. /dev/ttyS0)> -S <CA SPaT port, (def. /dev/ttyS1) -v (verbose) -i <loop interval> -b (output binary SPaT message) -s <UDP unicast destination> -o <UDP unicast port>\n", argv[0]);
+			fprintf(stderr, "Usage: %s -A <AB3418 port, (def. /dev/ttyS0)> -S <CA SPaT port, (def. /dev/ttyS1) -v (verbose) -i <loop interval> -b (output binary SPaT message) -s <UDP unicast destination> -o <UDP unicast port> -l <lowest Battelle byte to display> -h <highest Battelle byte to display>\n", argv[0]);
 			exit(EXIT_FAILURE);
 		}
+	}
+
+	if(low_battelle >= 0) {
+		if( (low_battelle > 244) || (high_battelle > 244) ) {
+			fprintf(stderr, "Battelle bytes must be in the range 0-244. Exiting....\n");
+			exit(EXIT_FAILURE);
+		}
+		if(high_battelle < low_battelle)
+			high_battelle = ((low_battelle + 16) > 244) ? 244 : low_battelle + 16;
 	}
 
 	// Clear message structs
@@ -211,9 +231,15 @@ printf("ab3418commudp: Got to 8\n");
 
 while(1) {
 	retval = get_spat(wait_for_data, &raw_signal_status_msg, ca_spat_fdin, verbose, output_spat_binary);
-	retval = spat2battelle(&raw_signal_status_msg, &battelle_spat, &phase_status, pphase_timing);
+	retval = spat2battelle(&raw_signal_status_msg, &battelle_spat, pphase_timing);
 	snd_addr.sin_port = temp_port;
 	snd_addr.sin_addr.s_addr = temp_addr;
+	if(low_battelle >= 0) {
+		printf("ab3418udp:Battelle Spat: ");
+		for(i=low_battelle; i <= high_battelle; i++)
+			printf("#%d %#hhx ", i, pbattelle_spat[i]);
+		printf("\n");
+	}
 	if(output_spat_binary) {
 	bytes_sent = sendto(sd_out, &raw_signal_status_msg.active_phase, sizeof(raw_signal_status_msg_t) - 9, 0,
 		(struct sockaddr *) &snd_addr, sizeof(snd_addr));
