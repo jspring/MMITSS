@@ -1,4 +1,4 @@
-#include <db_include.h>
+#include "sys_os.h"
 #include "server_lib.h"
 
 #define BUFSIZE 1500
