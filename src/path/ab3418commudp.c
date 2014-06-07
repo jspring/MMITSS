@@ -289,8 +289,8 @@ while(1) {
 			perror("select");
 		if(numready == 0) {
 			fprintf(stderr, "select timeout: not getting CA SPaT within last 400 ms. Will try to reconnect to %s\n", ca_spat_port);
-			check_retval = check_and_reconnect_serial(0, &ca_spat_fdin, &ca_spat_fdout, ca_spat_port);
-			continue;
+//			check_retval = check_and_reconnect_serial(0, &ca_spat_fdin, &ca_spat_fdout, ca_spat_port);
+//			continue;
 		}
 	}
 
