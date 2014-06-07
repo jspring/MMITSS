@@ -33,23 +33,18 @@ static int sig_list[] =
 
 int OpenTSCPConnection(char *controllerIP, char *port);
 int process_phase_status( get_long_status8_resp_mess_typ *pstatus, int verbose, unsigned char greens, phase_status_t *pphase_status);
-extern int spat2battelle(raw_signal_status_msg_t *ca_spat, spat_ntcip_mib_t *battelle_spat, phase_timing_t *phase_timing[8]);
+extern int spat2battelle(raw_signal_status_msg_t *ca_spat, spat_ntcip_mib_t *battelle_spat, phase_timing_t *phase_timing[8], int verbose);
 
 int main(int argc, char *argv[]) {
 
-	posix_timer_typ *ptmr;
-
         struct sockaddr_in snd_addr;    /// used in sendto call
 	int i;
-	int ab3418_fdin = 0;
-	int ab3418_fdout = 0;
-	int ca_spat_fdin = 0;
-	int ca_spat_fdout = 0;
-	int trafficctlfd = 0;
+	int ab3418_fdin = -1;
+	int ab3418_fdout = -1;
+	int ca_spat_fdin = -1;
+	int ca_spat_fdout = -1;
 	char trafficctlreadbuf[1000];
 	int len;
-	FILE *fifofd = 0;
-	phase_status_t phase_status;
 	int wait_for_data = 1;
 	gen_mess_typ readBuff;
 	phase_timing_t phase_timing[MAX_PHASES];
@@ -76,12 +71,9 @@ int main(int argc, char *argv[]) {
 //        struct timeb timeptr_raw;
 //        struct tm time_converted;
 	int opt;
-	int use_db = 0;
-	int interval = 100;
 	int verbose = 0;
 	int low_battelle = -1;
 	int high_battelle = -1;
-	unsigned char greens = 0;
 	unsigned char no_control = 0;
 //	unsigned char no_control_sav = 0;
 //	char detector = 0;
@@ -92,14 +84,24 @@ int main(int argc, char *argv[]) {
 //	unsigned char new_phase_assignment;	
 	unsigned char output_spat_binary = 0;
 
-        int sd_out;             /// socket descriptor for UDP send
-        short udp_port = 0;    /// set from command line option
-        char *udp_name = NULL;  /// address of UDP destination
+        int sd_out = -5;             /// socket descriptor for UDP send
+        short udp_out_port = 0;    /// set from command line option
+        char *udp_out_name = "127.0.0.1";  /// address of UDP destination
         int bytes_sent;         /// returned from sendto
+ 
+        int sd_in = -5;             /// socket descriptor for UDP receive 
+        short udp_in_port = 0;    /// set from command line option
+
+	struct timeval timeout;
+	fd_set readfds, readfds_sav;
+	fd_set writefds, writefds_sav;
+	int maxfd = 0;
+	int numready;
+
  
 	pbattelle_spat = (char *)&battelle_spat;
 
-        while ((opt = getopt(argc, argv, "A:S:uvi:na:bo:s:l:h:z")) != -1)
+        while ((opt = getopt(argc, argv, "A:S:vi:na:bo:s:l:h:z")) != -1)
         {
                 switch (opt)
                 {
@@ -111,14 +113,11 @@ int main(int argc, char *argv[]) {
 			memset(ca_spat_port, 0, sizeof(ca_spat_port));
                         strncpy(&ca_spat_port[0], optarg, 16);
                         break;
-                  case 'u':
-                        use_db = 1;
-                        break;
                   case 'v':
                         verbose = 1;
                         break;
                   case 'i':
-                        interval = atoi(optarg);
+                        udp_in_port = (short)atoi(optarg);
                         break;
                   case 'n':
                         no_control = 1;
@@ -130,10 +129,10 @@ int main(int argc, char *argv[]) {
                         output_spat_binary = 1;
                         break;
                   case 'o':
-                        udp_port = (short)atoi(optarg);
+                        udp_out_port = (short)atoi(optarg);
                         break;
                   case 's':
-                        udp_name = strdup(optarg);
+                        udp_out_name = strdup(optarg);
                         break;
                   case 'l':
                         low_battelle = atoi(optarg);
@@ -143,7 +142,7 @@ int main(int argc, char *argv[]) {
                         break;
 		  case 'z':
 		  default:
-			fprintf(stderr, "Usage: %s -A <AB3418 port, (def. /dev/ttyS0)> -S <CA SPaT port, (def. /dev/ttyS1) -v (verbose) -i <loop interval> -b (output binary SPaT message) -s <UDP unicast destination> -o <UDP unicast port> -l <lowest Battelle byte to display> -h <highest Battelle byte to display>\n", argv[0]);
+			fprintf(stderr, "Usage: %s -A <AB3418 port, (def. /dev/ttyS0)> -S <CA SPaT port, (def. /dev/ttyS1)> -v (verbose) -i <UDP input port> -b (output binary SPaT message) -s <UDP unicast destination (def. 127.0.0.1)> -o <UDP unicast port> -l <lowest Battelle byte to display> -h <highest Battelle byte to display>\n", argv[0]);
 			exit(EXIT_FAILURE);
 		}
 	}
@@ -164,24 +163,39 @@ int main(int argc, char *argv[]) {
 	for(i=0; i<MAX_PHASES; i++) 
 		pphase_timing[i] = &phase_timing[i];
 
-	if ((ptmr = timer_init( interval, 0)) == NULL) {
-		fprintf(stderr, "Unable to initialize delay timer\n");
-		exit(EXIT_FAILURE);
-	}
-
-	if( (udp_port != 0) && (udp_name != NULL) ) {
+	if( udp_out_port >= 0  ) {
 		fprintf(stderr, "Opening UDP unicast to destination %s port %hu\n",
-			udp_name, udp_port);
-                sd_out = udp_unicast_init(&snd_addr, udp_name, udp_port);
+			udp_out_name, udp_out_port);
+                sd_out = udp_unicast_init(&snd_addr, udp_out_name, udp_out_port);
 
 		if (sd_out < 0) {
-			printf("failure opening socket on %s %d\n",
-				udp_name, udp_port);
+			printf("Failure opening unicast socket on %s %d\n",
+				udp_out_name, udp_out_port);
 			exit(EXIT_FAILURE);
 		}
 		else {
 			printf("Success opening socket %hhu on %s %d\n",
-				sd_out, udp_name, udp_port);
+				sd_out, udp_out_name, udp_out_port);
+			printf("port %d addr 0x%08x\n", ntohs(snd_addr.sin_port),
+			ntohl(snd_addr.sin_addr.s_addr));
+			temp_addr = snd_addr.sin_addr.s_addr;
+			temp_port = snd_addr.sin_port;
+		}
+	}
+	if( udp_in_port >= 0  ) {
+		fprintf(stderr, "Opening UDP listener on port %hu\n",
+			udp_in_port);
+
+        	sd_in = udp_allow_all(udp_in_port);
+
+		if (sd_in < 0) {
+			printf("Failure opening listener socket on port %d\n",
+				udp_in_port);
+			exit(EXIT_FAILURE);
+		}
+		else {
+			printf("Success opening socket %hhu on port %d\n",
+				sd_in, udp_in_port);
 			printf("port %d addr 0x%08x\n", ntohs(snd_addr.sin_port),
 			ntohl(snd_addr.sin_addr.s_addr));
 			temp_addr = snd_addr.sin_addr.s_addr;
@@ -192,6 +206,8 @@ int main(int argc, char *argv[]) {
         /* Initialize serial port. */
 	check_retval = check_and_reconnect_serial(0, &ab3418_fdin, &ab3418_fdout, ab3418_port);
 	check_retval = check_and_reconnect_serial(0, &ca_spat_fdin, &ca_spat_fdout, ca_spat_port);
+
+
 		if (setjmp(exit_env) != 0) {
 
 			if(retval < 0) 
@@ -209,15 +225,10 @@ int main(int argc, char *argv[]) {
 		} else {
 printf("ab3418commudp: Got to 6\n");
 //			sig_ign(sig_list, sig_hand);
-printf("ab3418commudp: Got to 7\n");
+printf("ab3418commudp: Got to 7 ca_spat_port %s\n", ca_spat_port);
 		}
 
 printf("ab3418commudp: Got to 8\n");
-
-	if ((ptmr = timer_init( interval, 0)) == NULL) {
-		fprintf(stderr, "Unable to initialize delay timer\n");
-		exit(EXIT_FAILURE);
-	}
 
 	printf("main 1: getting timing settings before infinite loop\n");
 	for(i=0; i<MAX_PHASES; i++) {
@@ -229,17 +240,82 @@ printf("ab3418commudp: Got to 8\n");
 		usleep(500000);
 	}
 
-while(1) {
-	retval = get_spat(wait_for_data, &raw_signal_status_msg, ca_spat_fdin, verbose, output_spat_binary);
-	retval = spat2battelle(&raw_signal_status_msg, &battelle_spat, pphase_timing);
-	snd_addr.sin_port = temp_port;
-	snd_addr.sin_addr.s_addr = temp_addr;
-	if(low_battelle >= 0) {
-		printf("ab3418udp:Battelle Spat: ");
-		for(i=low_battelle; i <= high_battelle; i++)
-			printf("#%d %#hhx ", i, pbattelle_spat[i]);
-		printf("\n");
+
+	//Zero out saved fds
+	FD_ZERO(&readfds_sav);
+	FD_ZERO(&writefds_sav);
+	if(sd_in >= 0) {
+		FD_SET(sd_in, &readfds_sav);
+		maxfd = sd_in;
+printf("Got to 10 sd_in %d maxfd %d\n", sd_in, maxfd);
 	}
+	if(sd_out >= 0){
+		FD_SET(sd_out, &writefds_sav);
+		maxfd = (sd_out > maxfd) ? sd_out : maxfd;
+printf("Got to 11 sd_out %d maxfd %d\n", sd_out, maxfd);
+	}
+
+	if(ab3418_fdin >= 0){
+		FD_SET(ab3418_fdin, &readfds_sav);
+		maxfd = (ab3418_fdin > maxfd) ? ab3418_fdin : maxfd;
+printf("Got to 12 ab3418_fdin %d maxfd %d\n", ab3418_fdin, maxfd);
+	}
+	if(ab3418_fdout >= 0){
+		FD_SET(ab3418_fdout, &writefds_sav);
+		maxfd = (ab3418_fdout > maxfd) ? ab3418_fdout : maxfd;
+printf("Got to 13 ab3418_fdout %d maxfd %d\n", ab3418_fdout, maxfd);
+	}
+	if(ca_spat_fdin >= 0){
+		FD_SET(ca_spat_fdin, &readfds_sav);
+		maxfd = (ca_spat_fdin > maxfd) ? ca_spat_fdin : maxfd;
+printf("Got to 14 ca_spat_fdin %d maxfd %d\n", ca_spat_fdin, maxfd);
+	}
+	if(ca_spat_fdout >= 0){
+		FD_SET(ca_spat_fdout, &writefds_sav);
+		maxfd = (ca_spat_fdout > maxfd) ? ca_spat_fdout : maxfd;
+printf("Got to 15 ca_spat_fdout %d maxfd %d\n", ca_spat_fdout, maxfd);
+	}
+
+printf("ab3418commudp: Got to 16  ca_spat_port %s\n", ca_spat_port);
+while(1) {
+
+        readfds = readfds_sav;
+        writefds = writefds_sav;
+	timeout.tv_sec = 0;
+	timeout.tv_usec = 400000;
+        numready = select(maxfd+1, &readfds, NULL, NULL, &timeout); // Tells me one of the old or new sockets is ready to read
+	if(numready <=0) {
+		if(errno != EINTR)
+			perror("select");
+		if(numready == 0) {
+			fprintf(stderr, "select timeout: not getting CA SPaT within last 400 ms. Will try to reconnect to %s\n", ca_spat_port);
+			check_retval = check_and_reconnect_serial(0, &ca_spat_fdin, &ca_spat_fdout, ca_spat_port);
+			continue;
+		}
+	}
+
+	if(FD_ISSET(ca_spat_fdin, &readfds)) {
+		retval = get_spat(wait_for_data, &raw_signal_status_msg, ca_spat_fdin, verbose, output_spat_binary);
+		retval = spat2battelle(&raw_signal_status_msg, &battelle_spat, pphase_timing, verbose);
+		snd_addr.sin_port = temp_port;
+		snd_addr.sin_addr.s_addr = temp_addr;
+		if(low_battelle >= 0) {
+			printf("ab3418udp:Battelle Spat: ");
+			for(i=low_battelle; i <= high_battelle; i++)
+				printf("#%d %#hhx ", i, pbattelle_spat[i]);
+			printf("\n");
+		}
+	}
+	if(FD_ISSET(sd_in, &readfds)) {
+		if( (retval = recvfrom(sd_in, trafficctlreadbuf, sizeof(trafficctlreadbuf), 0,
+			(struct sockaddr *)&trafficctl_addr, (socklen_t *)&len)) > 0) {
+			printf("Hallelujah, I got %d bytes!\n", retval);
+			if(no_control == 0) {
+//				retval = set_timing(&db_timing_set_2070, &msg_len, ab3418_fdin, ab3418_fdout, verbose);
+			}
+		}
+	}
+
 	if(output_spat_binary) {
 	bytes_sent = sendto(sd_out, &raw_signal_status_msg.active_phase, sizeof(raw_signal_status_msg_t) - 9, 0,
 		(struct sockaddr *) &snd_addr, sizeof(snd_addr));
@@ -305,50 +381,15 @@ while(1) {
 //		time_converted.tm_min,
 //		time_converted.tm_sec,
 //		timeptr_raw.millitm);
-	TIMER_WAIT(ptmr);
-}
-	exit(EXIT_SUCCESS);
 
-	while(1) {
-		if( (retval = recvfrom(trafficctlfd, trafficctlreadbuf, sizeof(trafficctlreadbuf), 0,
-			(struct sockaddr *)&trafficctl_addr, (socklen_t *)&len)) > 0) {
-			printf("Hallelujah, I got %d bytes!\n", retval);
-			if(no_control == 0) {
-//				retval = set_timing(&db_timing_set_2070, &msg_len, ab3418_fdin, ab3418_fdout, verbose);
-			}
-		}
 		else {	
 			retval = get_status(wait_for_data, &readBuff, ab3418_fdin, ab3418_fdout, verbose);
 			if(retval < 0) 
 				check_retval = check_and_reconnect_serial(retval, &ab3418_fdin, &ab3418_fdout, ab3418_port);
-			if(use_db && (retval == 0) ) {
-// Should this be a udp send?	db_clt_write(pclt, DB_TSCP_STATUS_VAR, sizeof(get_long_status8_resp_mess_typ), (get_long_status8_resp_mess_typ *)&readBuff);
-				retval = process_phase_status( (get_long_status8_resp_mess_typ *)&readBuff, verbose, greens, &phase_status);
-// Should this be a udp send?	db_clt_write(pclt, DB_PHASE_STATUS_VAR, sizeof(phase_status_t), &phase_status);
-				fifofd = fopen("/tmp/blah", "w");
-				for(i=0; i<8; i++) {
-					fprintf(fifofd, "%d", phase_status.phase_status_colors[i]);
-				}
-				fclose(fifofd);
 			if(verbose) 
 				print_status( (get_long_status8_resp_mess_typ *)&readBuff);
-			}
-			else 
 				if(retval < 0) 
 					printf("get_status returned negative value: %d\n", retval);
-			usleep(80000);
-			retval = get_short_status(wait_for_data, &readBuff, ab3418_fdin, ab3418_fdout, verbose);
-			if(retval < 0) 
-				check_retval = check_and_reconnect_serial(retval, &ab3418_fdin, &ab3418_fdout, ab3418_port);
-			if(use_db && (retval == 0) ) {
-			    greens = readBuff.data[5];	
-			    if(verbose) 
-				printf("ab3418comm: get_short_status: greens %#hhx\n", readBuff.data[5]);
-// Should this be a udp send?	db_clt_write(pclt, DB_SHORT_STATUS_VAR, sizeof(get_short_status_resp_t), (get_short_status_resp_t *)&readBuff);
-			}
-			else 
-				if(retval < 0)
-					printf("get_short_status returned negative value: %d\n", retval);
 		}
 		if(verbose) {
 			clock_gettime(CLOCK_REALTIME, &end_time);
@@ -371,8 +412,6 @@ while(1) {
 			no_control = 0;
 		}
 
-		if(!use_db)
-			TIMER_WAIT(ptmr);
 	}
 	return retval;
 }

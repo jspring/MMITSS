@@ -1480,10 +1480,13 @@ int spat2battelle(raw_signal_status_msg_t *ca_spat, spat_ntcip_mib_t *battelle_s
 				i, battelle_spat->time_to_change[3].VehMaxTimeToChange);
 	    }
 	}
-	printf("   PhaseStatusReds %#hx PhaseStatusYellow %#hx PhaseStatusGreens %#hx\n",
+	printf("   PhaseStatusReds %#hx PhaseStatusYellow %#hx PhaseStatusGreens %#hx active_phase %#hhx intvA %#hhx intvB %#hhx\n",
 		battelle_spat->PhaseStatusReds,
 		battelle_spat->PhaseStatusYellow,
-		battelle_spat->PhaseStatusGreens
+		battelle_spat->PhaseStatusGreens,
+		ca_spat->active_phase,
+		ca_spat->interval_A,
+		ca_spat->interval_B
 	);
 	printf("   PhaseStatusDontWalks %#hx PhaseStatusPedClears %#hx PhaseStatusWalks %#hx SystemSeconds %u tstemp %u %hu\n",
 		battelle_spat->PhaseStatusDontWalks,
