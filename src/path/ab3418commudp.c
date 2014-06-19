@@ -1,4 +1,4 @@
-/* ab3418comm - AB3418<-->database communicator
+/* ab3418commudp - AB3418<-->database communicator
 */
 
 #include <sys_os.h>
@@ -6,11 +6,10 @@
 #include "sys_rt_linux.h"
 #include "ab3418_libudp.h"
 #include "ab3418commudp.h"
-//#include "urms.h"
 #include <udp_utils.h>
 #include "Battelle_SPaT_MIB.h"
+#include "local.h"
 
-#define MAX_PHASES	8
 #define TRAFFICCTLPORT	5300
 
 static jmp_buf exit_env;
@@ -29,11 +28,12 @@ static int sig_list[] =
         SIGQUIT,
         SIGTERM,
         SIGALRM,
+	ERROR
 };
 
 int OpenTSCPConnection(char *controllerIP, char *port);
 int process_phase_status( get_long_status8_resp_mess_typ *pstatus, int verbose, unsigned char greens, phase_status_t *pphase_status);
-extern int spat2battelle(raw_signal_status_msg_t *ca_spat, spat_ntcip_mib_t *battelle_spat, phase_timing_t *phase_timing[8], int verbose);
+extern int spat2battelle(raw_signal_status_msg_t *ca_spat, battelle_spat_t *battelle_spat, phase_timing_t *phase_timing[8], int verbose);
 
 int main(int argc, char *argv[]) {
 
@@ -43,15 +43,19 @@ int main(int argc, char *argv[]) {
 	int ab3418_fdout = -1;
 	int ca_spat_fdin = -1;
 	int ca_spat_fdout = -1;
-	char trafficctlreadbuf[1000];
+	char trafficctlreadbuf[60];
 	int len;
 	int wait_for_data = 1;
 	gen_mess_typ readBuff;
+	get_long_status8_resp_mess_typ long_status8; 
+	sig_plan_msg_t sig_plan_msg;
 	phase_timing_t phase_timing[MAX_PHASES];
 	phase_timing_t *pphase_timing[MAX_PHASES];
 	raw_signal_status_msg_t raw_signal_status_msg;
-	spat_ntcip_mib_t battelle_spat;
+	plan_params_t plan_params[MAX_PLANS + 1]; //Plan[0]=Free, Plan[10]=Saved plan
+	battelle_spat_t battelle_spat;
 	char *pbattelle_spat;
+	mschedule_t mschedule;
 	db_timing_set_2070_t db_timing_set_2070;
 	db_timing_get_2070_t db_timing_get_2070;
 	int retval;
@@ -79,7 +83,6 @@ int main(int argc, char *argv[]) {
 //	char detector = 0;
 	unsigned int temp_addr;
 	short temp_port;
-//	int blocknum;
 //	int rem;
 //	unsigned char new_phase_assignment;	
 	unsigned char output_spat_binary = 0;
@@ -223,12 +226,11 @@ int main(int argc, char *argv[]) {
                        		close(ca_spat_fdout);
 			exit(EXIT_SUCCESS);
 		} else {
-printf("ab3418commudp: Got to 6\n");
-//			sig_ign(sig_list, sig_hand);
-printf("ab3418commudp: Got to 7 ca_spat_port %s\n", ca_spat_port);
+printf("ab3418commudp: Got to 1\n");
+//			sig_ign(&sig_list[0], sig_hand);
+printf("ab3418commudp: Got to 2 ca_spat_port %s\n", ca_spat_port);
 		}
 
-printf("ab3418commudp: Got to 8\n");
 
 	printf("main 1: getting timing settings before infinite loop\n");
 	for(i=0; i<MAX_PHASES; i++) {
@@ -240,6 +242,17 @@ printf("ab3418commudp: Got to 8\n");
 		usleep(500000);
 	}
 
+	printf("main 2: getting coordination plan settings before infinite loop\n");
+	for(i=1; i<=MAX_PLANS; i++) {
+		retval = get_coord_params(&plan_params[i], i, wait_for_data, &ab3418_fdout, &ab3418_fdin, verbose);
+		if(retval < 0) {
+			printf("get_coord_params returned %d for plan %d\n",
+				retval,
+				i
+			);
+			exit(EXIT_FAILURE);
+		}
+	}
 
 	//Zero out saved fds
 	FD_ZERO(&readfds_sav);
@@ -247,36 +260,29 @@ printf("ab3418commudp: Got to 8\n");
 	if(sd_in >= 0) {
 		FD_SET(sd_in, &readfds_sav);
 		maxfd = sd_in;
-printf("Got to 10 sd_in %d maxfd %d\n", sd_in, maxfd);
 	}
 	if(sd_out >= 0){
 		FD_SET(sd_out, &writefds_sav);
 		maxfd = (sd_out > maxfd) ? sd_out : maxfd;
-printf("Got to 11 sd_out %d maxfd %d\n", sd_out, maxfd);
 	}
 
 	if(ab3418_fdin >= 0){
 		FD_SET(ab3418_fdin, &readfds_sav);
 		maxfd = (ab3418_fdin > maxfd) ? ab3418_fdin : maxfd;
-printf("Got to 12 ab3418_fdin %d maxfd %d\n", ab3418_fdin, maxfd);
 	}
 	if(ab3418_fdout >= 0){
 		FD_SET(ab3418_fdout, &writefds_sav);
 		maxfd = (ab3418_fdout > maxfd) ? ab3418_fdout : maxfd;
-printf("Got to 13 ab3418_fdout %d maxfd %d\n", ab3418_fdout, maxfd);
 	}
 	if(ca_spat_fdin >= 0){
 		FD_SET(ca_spat_fdin, &readfds_sav);
 		maxfd = (ca_spat_fdin > maxfd) ? ca_spat_fdin : maxfd;
-printf("Got to 14 ca_spat_fdin %d maxfd %d\n", ca_spat_fdin, maxfd);
 	}
 	if(ca_spat_fdout >= 0){
 		FD_SET(ca_spat_fdout, &writefds_sav);
 		maxfd = (ca_spat_fdout > maxfd) ? ca_spat_fdout : maxfd;
-printf("Got to 15 ca_spat_fdout %d maxfd %d\n", ca_spat_fdout, maxfd);
 	}
 
-printf("ab3418commudp: Got to 16  ca_spat_port %s\n", ca_spat_port);
 while(1) {
 
         readfds = readfds_sav;
@@ -295,8 +301,10 @@ while(1) {
 	}
 
 	if(FD_ISSET(ca_spat_fdin, &readfds)) {
+		retval = get_status(wait_for_data, &readBuff, ab3418_fdin, ab3418_fdout, verbose);
 		retval = get_spat(wait_for_data, &raw_signal_status_msg, ca_spat_fdin, verbose, output_spat_binary);
-		retval = spat2battelle(&raw_signal_status_msg, &battelle_spat, pphase_timing, verbose);
+		memcpy(&long_status8, &readBuff, sizeof(get_long_status8_resp_mess_typ));
+		retval = build_spat(&sig_plan_msg, &raw_signal_status_msg, pphase_timing, &long_status8, &plan_params[0], &battelle_spat, verbose);
 		snd_addr.sin_port = temp_port;
 		snd_addr.sin_addr.s_addr = temp_addr;
 		if(low_battelle >= 0) {
@@ -307,11 +315,36 @@ while(1) {
 		}
 	}
 	if(FD_ISSET(sd_in, &readfds)) {
+		memset(trafficctlreadbuf, 0, sizeof(trafficctlreadbuf));
 		if( (retval = recvfrom(sd_in, trafficctlreadbuf, sizeof(trafficctlreadbuf), 0,
 			(struct sockaddr *)&trafficctl_addr, (socklen_t *)&len)) > 0) {
-			printf("Hallelujah, I got %d bytes!\n", retval);
-			if(no_control == 0) {
-//				retval = set_timing(&db_timing_set_2070, &msg_len, ab3418_fdin, ab3418_fdout, verbose);
+			if(trafficctlreadbuf[2] == SIGNAL_SCHED_MSG) {
+				printf("trafficctlreadbuf: \n");
+				for(i=0; i<sizeof(trafficctlreadbuf); i++) 
+					printf("#%d %hhx ", i, trafficctlreadbuf[i]);
+				printf("\n");
+				memcpy(&mschedule, trafficctlreadbuf, sizeof(mschedule_t));
+				printf("Timing schedule request:\nPhase sequence: ");
+				for(i=0; i<8; i++)
+					printf("%03hhu ", mschedule.phase_sequence.phase_sequence[i]);
+				printf("\nPhase duration: ");
+				for(i=0; i<8; i++)
+					printf("%03hhu ", mschedule.phase_duration.phase_duration[i]);
+				printf("\n");
+
+				retval = get_coord_params(&plan_params[9], 9, 
+					wait_for_data, &ab3418_fdout, &ab3418_fdin, verbose);
+				if(retval < 0) {
+					printf("get_coord_params returned %d for plan 9\n",
+						retval);
+				} 
+				else {
+no_control = 0;
+					if(no_control == 0)
+						memcpy(&plan_params[10], &plan_params[9], sizeof(plan_params_t));
+						printf("Hall cycle length %d\n", plan_params[10].cycle_length);
+						retval = set_coord_params(&plan_params[9], 9, &mschedule, 1, ab3418_fdout, ab3418_fdin, verbose);
+				}
 			}
 		}
 	}
@@ -367,12 +400,12 @@ while(1) {
 		fflush(stdout);
 	}
 
-	if (bytes_sent < 0) {
-		perror("sendto error");
-		printf("port %d addr 0x%08x\n", ntohs(snd_addr.sin_port),
-			ntohl(snd_addr.sin_addr.s_addr));
-		fflush(stdout);
-	}
+//	if (bytes_sent < 0) {
+//		perror("sendto error");
+//		printf("port %d addr 0x%08x\n", ntohs(snd_addr.sin_port),
+//			ntohl(snd_addr.sin_addr.s_addr));
+//		fflush(stdout);
+//	}
 
 //        ftime ( &timeptr_raw );
 //        localtime_r ( &timeptr_raw.time, &time_converted );
@@ -384,6 +417,7 @@ while(1) {
 
 		else {	
 			retval = get_status(wait_for_data, &readBuff, ab3418_fdin, ab3418_fdout, verbose);
+			memcpy(&long_status8, &readBuff, sizeof(get_long_status8_resp_mess_typ)); 
 			if(retval < 0) 
 				check_retval = check_and_reconnect_serial(retval, &ab3418_fdin, &ab3418_fdout, ab3418_port);
 			if(verbose) 
@@ -403,7 +437,7 @@ while(1) {
 		clock_gettime(CLOCK_REALTIME, &tp);
 		ltime = localtime(&tp.tv_sec);
 		dow = ltime->tm_wday;
-		printf("dow=%d dow%%6=%d hour %d\n", dow, dow % 6, ltime->tm_hour);
+//		printf("dow=%d dow%%6=%d hour %d\n", dow, dow % 6, ltime->tm_hour);
 
 		if( ((dow % 6) == 0) || (ltime->tm_hour < 15) || (ltime->tm_hour >= 19) ) {
 			no_control = 1;

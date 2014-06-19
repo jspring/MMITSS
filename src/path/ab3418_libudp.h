@@ -8,6 +8,9 @@
 #define	FALSE	0
 #define	TRUE	1
 
+#define MAX_PHASES	8
+#define MAX_PLANS	10
+
 typedef int bool_typ;
 
 typedef struct {
@@ -48,5 +51,8 @@ extern int set_timing(db_timing_set_2070_t *db_timing_set_2070, int *msg_len, in
 extern int print_status(get_long_status8_resp_mess_typ *status);
 extern void fcs_hdlc(int msg_len, void *msgbuf, char verbose);
 extern int get_spat(int wait_for_data, raw_signal_status_msg_t *praw_signal_status_msg, int fpin, char verbose, char print_packed_binary);
+extern int build_spat(sig_plan_msg_t *sig_plan_msg, raw_signal_status_msg_t *ca_spat, phase_timing_t *phase_timing[8], get_long_status8_resp_mess_typ *long_status8, plan_params_t *plan_params[MAX_PLANS], battelle_spat_t *battelle_spat, int verbose);
+int get_coord_params(plan_params_t *plan_params, int plan_num, int wait_for_data, int *fpout, int *fpin, char verbose);
+extern int set_coord_params(plan_params_t *plan_params, int plan_num, mschedule_t *mschedule, int wait_for_data, int fdout, int fdin, char verbose);
 
 #endif

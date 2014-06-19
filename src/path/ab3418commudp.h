@@ -91,8 +91,179 @@ typedef struct {
 } IS_PACKED phase_timing_t; 
 
 typedef struct {
+	unsigned char plan_num; //aka block ID in TSMSS message
+	unsigned char cycle_length;
+	unsigned char green_factor[8];
+	unsigned char multiplier;
+	unsigned char offsetA;
+	unsigned char offsetB;
+	unsigned char offsetC;
+	unsigned char permissive;
+	unsigned char lag_phases;
+	unsigned char sync_phases;
+	unsigned char hold_phases;
+	unsigned char omit_phases;
+	unsigned char veh_min_recall;
+	unsigned char veh_max_recall;
+	unsigned char ped_recall;
+	unsigned char bicycle_recall;
+	unsigned char force_off_flag;
+	unsigned char spare1;
+	unsigned char spare2;
+	unsigned char spare3;
+} IS_PACKED plan_params_t; 
+
+typedef struct {
+	unsigned char obj_id; 	//Object ID; set to 0x01
+	unsigned char size;	//Message size, not including obj_id and size; set to 0x31
+	unsigned char permitted_phases;	//Bit-mapped with permitted phases
+	unsigned char min_green[8];	//Minimum green, sec
+	unsigned char max_green[8];	//Maximum green, sec
+	unsigned char ped_walk[8];	//Pedestrian walk, sec
+	unsigned char ped_clr[8];	//Pedestrian clear time (i.e. flash don't walk), sec
+	unsigned char yellow[8];	//Phase yellow time, sec
+	unsigned char red_clr[8];	//Phase all-red, sec
+} IS_PACKED phase_timing_params_t;
+
+typedef struct {
+	unsigned char obj_id; 	//Object ID; set to 0x02
+	unsigned char size;	//Message size, not including obj_id and size; set to 0x0C
+	unsigned char plan_num;	//Coordination plan number 
+	unsigned char cycle_length;	//Cycle length
+	unsigned char offset;	//Current offset (A, B, or C)
+	unsigned char coord_phase;	//Coordination phase; bit-mapped
+	unsigned char green_factor[8];	//Green factor
+} IS_PACKED  coordination_plan_params_t;
+	
+typedef struct {
+	unsigned short 	internal_msg_header; 	// set to 0xffff
+	unsigned char	msg_id;		    	// set to 0x01
+	unsigned int	ms_since_midnight;	// time since midnight, 0.001 s resolution
+	phase_timing_params_t phase_timing_params;
+	coordination_plan_params_t coordination_plan_params;
+} IS_PACKED sig_plan_msg_t;
+
+//Battelle SPaT objects
+
+typedef struct {
+	unsigned char obj_id; //=0x01
+	unsigned char size; //=0x04
+	unsigned int intersection_id;
+} IS_PACKED intersection_id_t;
+
+typedef struct {
+	unsigned char obj_id; //=0x02
+	unsigned char size; //=0x01
+	unsigned char intersection_status;
+} IS_PACKED intersection_status_t;
+
+typedef struct {
+	unsigned char obj_id; //=0x03
+	unsigned char size; //=0x05
+	unsigned int timestamp_sec;
+	unsigned char timestamp_tenths;
+} IS_PACKED message_timestamp_t;
+
+#define NUM_LANES	8
+typedef struct {
+	unsigned char obj_id; //=0x05
+	unsigned char size; //=16 (variable, 2 bytes per lane described)
+	unsigned char laneset[NUM_LANES][2]; //For now, lane=phase
+} IS_PACKED lane_set_t;
+
+typedef struct {
+	unsigned char obj_id; //=0x06
+	unsigned char size; //=32
+	unsigned char currentstate[NUM_LANES][4];
+} IS_PACKED current_state_t;
+
+typedef struct {
+	unsigned char obj_id; //=0x07
+	unsigned char size; //=1
+	unsigned short mintimeremaining;
+} IS_PACKED min_time_remaining_t;
+
+typedef struct {
+	unsigned char obj_id; //=0x08
+	unsigned char size; //=1
+	unsigned short maxtimeremaining;
+} IS_PACKED max_time_remaining_t;
+
+typedef struct {
+	unsigned char obj_id; //=0x09
+	unsigned char size; //=32
+	unsigned char yellowstate[NUM_LANES][4];
+} IS_PACKED yellow_state_t;
+
+#define MAX_PHASES	8
+typedef struct {
+	unsigned char obj_id; //=0x0A
+	unsigned char size; //=16
+	unsigned short yellowtime[MAX_PHASES]; //=yellow timing parameter
+} IS_PACKED yellow_time_t;
+
+typedef struct {
+	unsigned char obj_id; //=0x0B
+	unsigned char size; //=0x01
+	unsigned char detect_flag;
+} IS_PACKED ped_detected_t;
+
+typedef struct {
+	unsigned char obj_id; //=0x0C
+	unsigned char size; //=0x01
+	unsigned char ped_veh_count;
+} IS_PACKED ped_veh_count_t;
+
+//From the Battelle spec descriptions, it appears that
+//the only movements to be included pertain to active
+//phases. That is the only way that min/max remaining
+//time would really make sense.
+typedef struct {
+	unsigned char obj_id; //=0x04
+	lane_set_t lane_set;
+	current_state_t current_state;
+	min_time_remaining_t min_time_remaining;
+	max_time_remaining_t max_time_remaining;
+	yellow_state_t yellow_state;
+	yellow_time_t yellow_time;
+	ped_detected_t ped_detected;
+	ped_veh_count_t ped_veh_count;
+} IS_PACKED movement_t;
+
+typedef struct {
+	unsigned char intersection_id; 		//=0x01
+	unsigned char intersection_id_size;	//=0x04
+	message_timestamp_t message_timestamp;
+	movement_t movement[MAX_PHASES];			//
+	unsigned char end_of_blob;		//=0xFF
+} IS_PACKED battelle_spat_t;
+
+typedef struct {
+	unsigned char	obj_id; //=0x01
+	unsigned char	size;	//=0x08
+	unsigned char	phase_sequence[8]; //0=skip?
+} IS_PACKED phase_sequence_t;
+
+typedef struct {
+	unsigned char	obj_id; //=0x02
+	unsigned char	size;	//=0x10
+	unsigned char	phase_duration[8]; //0=skip?
+} IS_PACKED phase_duration_t;
+
+#define	SIGNAL_SCHED_MSG	0x22
+typedef struct {
+	unsigned short		internal_msg_header; //=0xFFFF
+	unsigned char		sig_sche_msg_id; //=0x22
+	unsigned int		ms_since_midnight;
+	phase_sequence_t	phase_sequence; //Phase sequence is in the order:
+						//{R1L, R2L, R1l, R2l, R1L, R2L, R1l, R2l}
+						//where R#=ring number, L=lead, l=lag
+	phase_duration_t	phase_duration;
+} IS_PACKED mschedule_t;
+
+typedef struct {
 	int message_type;	//Set to 0x1234
-	unsigned char phase;			// phase
+	unsigned char phase;	//phase
 	int max_green;
 	int min_green;
 	int yellow;
@@ -103,7 +274,7 @@ typedef struct {
 
 typedef struct {
 	int message_type;	//Set to 0x1235
-	unsigned char phase;			// phase
+	unsigned char phase;	// phase
 	unsigned short page;	// timing settings=0x100, local plan settings=0x300
 } IS_PACKED db_2070_timing_get_t;
 

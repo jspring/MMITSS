@@ -4,6 +4,7 @@
 #include <search.h>
 #include "server_lib.h"
 #include "data_manager.h"
+#include "timestamp.h"
 #include "msgs.h"
 
 #define BUFSIZE 1500
@@ -65,6 +66,8 @@ int main( int argc, char *argv[]) {
 	int j;
 	char tempstr[] = "Got message!";
 	char tempstr2[100];
+	unsigned int ms_since_midnight;
+	timestamp_t ts;
 
 
 printf("Got to 0 NUMPORTS %d\n", NUMPORTS);
@@ -184,7 +187,9 @@ printf("Got to 4\n");
 	    		}
 	    	}
         	else {
-			printf("Read succeeded for %s(%d)\n", port[i].portdesc, port[i].portnum);
+			get_current_timestamp(&ts);
+			ms_since_midnight = (3600000 * ts.hour) + (60000 * ts.min) + (1000 * ts.sec) + ts.millisec;
+			printf("Read succeeded for %s(%d) ms-since-midnight %d\n", port[i].portdesc, port[i].portnum, ms_since_midnight);
 			if(mmitss_msg[buf[i][0]].struct_ptr == NULL)
 				mmitss_msg[buf[i][0]].struct_ptr = calloc(mmitss_msg[buf[i][0]].size, 1);
 			memcpy(&mmitss_msg[buf[i][0]].struct_ptr, &buf[i][j], mmitss_msg[buf[i][0]].size);

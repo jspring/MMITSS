@@ -1,4 +1,4 @@
-/*FILE: ab3418_lib.c   Function library for sending and receiving AB3418 messages from 2070 Controller
+/*FILE: ab3418_libudp.c   Function library for sending and receiving AB3418 messages from 2070 Controller and receiving UDP commands from outside utility
  *
  *
  * Copyright (c) 2013   Regents of the University of California
@@ -23,7 +23,6 @@
 #include "fcs.h"
 #include "ab3418_libudp.h"
 #include <sys/select.h>
-#include "Battelle_SPaT_MIB.h"
 
 #undef DEBUG_TRIG
 
@@ -51,7 +50,9 @@ int set_special_flags(get_set_special_flags_t *special_flags, int fpin, int fpou
 void fcs_hdlc(int msg_len, void *msgbuf, char verbose);
 int get_short_status(int wait_for_data, gen_mess_typ *readBuff, int fpin, int fpout, char verbose);
 int get_request(unsigned char msg_type, unsigned char page, unsigned char block, int fpout, char verbose);
-int spat2battelle(raw_signal_status_msg_t *ca_spat, spat_ntcip_mib_t *battelle_spat, phase_timing_t *phase_timing[8], int verbose);
+int spat2battelle(raw_signal_status_msg_t *ca_spat, battelle_spat_t *battelle_spat, phase_timing_t *phase_timing[8], int verbose);
+int get_coord_params(plan_params_t *plan_params, int plan_num, int wait_for_data, int *fpout, int *fpin, char verbose);
+int set_coord_params(plan_params_t *plan_params, int plan_num, mschedule_t *mschedule, int wait_for_data, int fdout, int fdin, char verbose);
 
 char *timing_strings[] = {
         "Walk_1",
@@ -463,6 +464,7 @@ void fcs_hdlc(int msg_len, void *msgbuf, char verbose) {
                 printf("\n");
         }
 }
+
 /* Create cell address and swap bytes (the AB3418 cell addresses are little-endian)*/
 unsigned short calc_cell_addr(unsigned short phase_1_cell_addr, unsigned char phase) {
 	unsigned short temp;
@@ -568,8 +570,8 @@ int set_timing(db_timing_set_2070_t *db_timing_set_2070, int *msg_len, int fpin,
 int get_request(unsigned char msg_type, unsigned char page, unsigned char block, int fpout, char verbose) {
 
 	int msg_len;
+	int selectval = 1000;
         fd_set writefds;
-        int selectval = 1000;
         struct timeval timeout;
         char *outportisset = "not yet initialized";
 	get_block_request_t get_block_request;
@@ -595,11 +597,13 @@ int get_request(unsigned char msg_type, unsigned char page, unsigned char block,
 	if( (selectval = select(fpout+1, NULL, &writefds, NULL, &timeout)) <=0) {
 		perror("select 8");
 		outportisset = (FD_ISSET(fpout, &writefds)) == 0 ? "no" : "yes";
-		printf("get_timing 3: fpout %d selectval %d outportisset %s\n", fpout, selectval, outportisset);
-		return -3;
+		printf("get_block_request 3: fpout %d outportisset %s\n", fpout, outportisset);
+		return -1;
 	}
-	write ( fpout, &get_block_request, sizeof(get_block_request_t));
-	fflush(NULL);
+	if( write(fpout, &get_block_request, sizeof(get_block_request_t)) < 0) {
+		perror("get_request write");
+		return -2;
+	}
 
 	if(verbose != 0)
 		printf("get_block_request: fpout %d selectval %d outportisset %s page %hhx block %hhx\n", fpout, selectval, outportisset, get_block_request.page, get_block_request.block);
@@ -661,7 +665,6 @@ int get_timing(db_timing_get_2070_t *db_timing_get_2070, int wait_for_data, phas
 			return -2;
 		    }
 		}
-printf("get_timing 4.5: *fpin %d\n", *fpin);
 		ser_driver_retval = ser_driver_read(&readBuff, *fpin, verbose);
 		if(ser_driver_retval == 0) {
 			printf("get_timing 5: Lost USB connection\n");
@@ -691,6 +694,157 @@ printf("get_timing 4.5: *fpin %d\n", *fpin);
 	}
 	if(verbose != 0)
 		printf("get_timing 6-end: *fpin %d selectval %d inportisset %s *fpout %d selectval %d outportisset %s ser_driver_retval %d get_controller_timing_data_request_mess.offset %hx\n", *fpin, selectval, inportisset, *fpout, selectval, outportisset, ser_driver_retval, get_controller_timing_data_request_mess.offset);
+	return 0;
+}
+
+int get_coord_params(plan_params_t *plan_params, int plan_num, int wait_for_data, int *fpout, int *fpin, char verbose) {
+
+        fd_set readfds;
+        int selectval = 1000;
+        struct timeval timeout;
+        char *inportisset = "not yet initialized";
+        char *outportisset = "not yet initialized";
+	int ser_driver_retval;
+	get_controller_timing_data_request_t get_controller_timing_data_request_mess;
+	gen_mess_typ readBuff;
+	int retval;
+	int i;
+
+	if( (retval = get_request( 0x87, 4, plan_num, *fpout, verbose)) < 0) {
+		printf("get_coord_params 1: get_request returned %d\n", retval);
+		return -1;
+	}
+
+	if(wait_for_data) {
+		FD_ZERO(&readfds);
+		FD_SET(*fpin, &readfds);
+		timeout.tv_sec = 1;
+		timeout.tv_usec = 0;
+		if( (selectval = select(*fpin+1, &readfds, NULL, NULL, &timeout)) <=0) {
+		    if(errno != EINTR) {
+			perror("select 9");
+			inportisset = (FD_ISSET(*fpin, &readfds)) == 0 ? "no" : "yes";
+			printf("get_coord_params 2: *fpin %d selectval %d inportisset %s\n", *fpin, selectval, inportisset);
+			return -2;
+		    }
+		}
+		ser_driver_retval = ser_driver_read(&readBuff, *fpin, verbose);
+		if(ser_driver_retval == 0) {
+			printf("get_coord_params 3: Lost serial connection\n");
+			return -3;
+		}
+		else {
+			memcpy(plan_params, &readBuff.data[6], 24);
+
+			if(verbose) 
+			{
+				printf("\nCoordination plan %d parameters:\n", plan_params->plan_num);
+				printf("Cycle length\t\t%hhu sec\n", plan_params->cycle_length);
+				for(i=0; i<8; i++)
+					printf("GF %d %d\n", i+1, plan_params->green_factor[i]);
+				printf("Multiplier\t%hhu sec\n", plan_params->multiplier);
+				printf("Offset A\t%hhu\n", plan_params->offsetA);
+				printf("Offset B\t%hhu\n", plan_params->offsetB);
+				printf("Offset C\t%hhu\n", plan_params->offsetC);
+				printf("Permissive\t%hhu\n", plan_params->permissive);
+				printf("Lag Phases\t%#hhx\n", plan_params->lag_phases);
+				printf("Sync Phases\t%#hhx\n", plan_params->sync_phases);
+				printf("Hold Phases\t%#hhx\n", plan_params->hold_phases);
+				printf("Omit Phases\t%#hhx\n", plan_params->omit_phases);
+				printf("Vehicle Min Recall\t%#hhx\n", plan_params->veh_min_recall);
+				printf("Vehicle Max Recall\t%#hhx\n", plan_params->veh_max_recall);
+				printf("Ped Recall\t%#hhx\n", plan_params->ped_recall);
+				printf("Bicycle Recall\t%#hhx\n", plan_params->bicycle_recall);
+				printf("Force Off Flag\t%#hhx\n", plan_params->force_off_flag);
+			}
+		}
+	}
+	if(verbose) 
+		printf("get_coord_params 6-end: *fpin %d selectval %d inportisset %s *fpout %d selectval %d outportisset %s ser_driver_retval %d get_controller_timing_data_request_mess.offset %hx\n", *fpin, selectval, inportisset, *fpout, selectval, outportisset, ser_driver_retval, get_controller_timing_data_request_mess.offset);
+
+	return 0;
+}
+
+int set_coord_params(plan_params_t *plan_params, int plan_num, mschedule_t *mschedule, int wait_for_data, int fdout, int fdin, char verbose) {
+
+	int msg_len;
+        fd_set readfds;
+        fd_set writefds;
+        int selectval = 1000;
+        struct timeval timeout;
+        char *inportisset = "not yet initialized";
+        char *outportisset = "not yet initialized";
+	int ser_driver_retval;
+	get_controller_timing_data_request_t get_controller_timing_data_request_mess;
+	gen_mess_typ readBuff;
+	int retval;
+	int i;
+	char coord_plan_msg_buf[37];
+
+	//Set the header and tail
+	coord_plan_msg_buf[0] = 0x7e;	//start flag
+	coord_plan_msg_buf[1] = 0x05;	//controller address
+	coord_plan_msg_buf[2] = 0x13;	//control
+	coord_plan_msg_buf[3] = 0xC0;	//IPI
+	coord_plan_msg_buf[4] = 0x96;	//set command
+	coord_plan_msg_buf[5] = 0x04;	//page ID
+	coord_plan_msg_buf[6] = plan_num; //aka block ID
+	coord_plan_msg_buf[34] = 0x00;	//FCS MSB
+	coord_plan_msg_buf[35] = 0x00;	//FCS LSB
+	coord_plan_msg_buf[36] = 0x7e;	//end flag
+
+	for(i=0; i<8; i++){
+		if( (mschedule->phase_sequence.phase_sequence[i] > 8) || (mschedule->phase_sequence.phase_sequence[i] < 1) )
+			return -1;
+		if( mschedule->phase_duration.phase_duration[i] > plan_params->cycle_length )
+			return -2;
+		plan_params->green_factor[mschedule->phase_sequence.phase_sequence[i] - 1] = mschedule->phase_duration.phase_duration[i];	
+	}
+
+	plan_params->lag_phases = (1 << (mschedule->phase_sequence.phase_sequence[2] - 1)) |
+				  (1 << (mschedule->phase_sequence.phase_sequence[3] - 1)) |
+				  (1 << (mschedule->phase_sequence.phase_sequence[6] - 1)) |
+				  (1 << (mschedule->phase_sequence.phase_sequence[7] - 1));
+
+	memcpy(&coord_plan_msg_buf[6], plan_params, sizeof(plan_params_t));
+
+	/* Now append the FCS. */
+	msg_len = sizeof(coord_plan_msg_buf) - 4;
+	fcs_hdlc(msg_len, coord_plan_msg_buf, verbose);
+	FD_ZERO(&writefds);
+	FD_SET(fdout, &writefds);
+	timeout.tv_sec = 1;
+	timeout.tv_usec = 0;
+	if( (selectval = select(fdout+1, NULL, &writefds, NULL, &timeout)) <=0) {
+		perror("coord_params select 1");
+		outportisset = (FD_ISSET(fdout, &writefds)) == 0 ? "no" : "yes";
+		printf("set_coord_params 3: fdout %d selectval %d outportisset %s\n", fdout, selectval, outportisset);
+		return -3;
+	}
+	write ( fdout, coord_plan_msg_buf, sizeof(coord_plan_msg_buf));
+	fflush(NULL);
+
+	ser_driver_retval = 100;
+
+	if(wait_for_data) {
+		FD_ZERO(&readfds);
+		FD_SET(fdin, &readfds);
+		timeout.tv_sec = 1;
+		timeout.tv_usec = 0;
+		if( (selectval = select(fdin+1, &readfds, NULL, NULL, &timeout)) <=0) {
+			perror("coord_params 2");
+			inportisset = (FD_ISSET(fdin, &readfds)) == 0 ? "no" : "yes";
+			printf("set_coord_params 4: fdin %d selectval %d inportisset %s\n", fdin, selectval, inportisset);
+			return -4;
+		}
+		ser_driver_retval = ser_driver_read(&readBuff, fdin, verbose);
+		if(ser_driver_retval == 0) {
+			printf("set_coord_params 5: Lost serial connection\n");
+			return -5;
+		}
+	}
+	if(verbose != 0)
+		printf("set_coord_params 6-end: fdin %d selectval %d inportisset %s fdout %d selectval %d outportisset %s ser_driver_retval %d\n", fdin, selectval, inportisset, fdout, selectval, outportisset, ser_driver_retval);
 	return 0;
 }
 
@@ -760,13 +914,14 @@ int get_status(int wait_for_data, gen_mess_typ *readBuff, int fpin, int fpout, c
 			return -1;
 		}
 	}
-	if(verbose != 0)
-                        clock_gettime(CLOCK_REALTIME, &end_time);
-                        printf("get_status: Time for function call %f sec\n",
-                                (end_time.tv_sec + (end_time.tv_nsec/1.0e9)) -
-                                (start_time.tv_sec + (start_time.tv_nsec/1.0e9))
-                                );
+	if(verbose != 0) {
+		clock_gettime(CLOCK_REALTIME, &end_time);
+		printf("get_status: Time for function call %f sec\n",
+			(end_time.tv_sec + (end_time.tv_nsec/1.0e9)) -
+			(start_time.tv_sec + (start_time.tv_nsec/1.0e9))
+		);
 		printf("get_status 6-end: fpin %d selectval %d inportisset %s fpout %d selectval %d outportisset %s ser_driver_retval %d\n", fpin, selectval, inportisset, fpout, selectval, outportisset, ser_driver_retval);
+	}
 	return 0;
 }
 
@@ -821,7 +976,7 @@ int get_spat(int wait_for_data, raw_signal_status_msg_t *praw_signal_status_msg,
 	if(print_packed_binary != 0)
 		write(STDOUT_FILENO, &readBuff->data[5], sizeof(raw_signal_status_msg_t) - 9);
 	else
-//	if(verbose != 0) 
+	if(verbose != 0) 
 	{
 //		printf("get_spat 6-end: fpin %d selectval %d inportisset %s fpout %d selectval %d outportisset %s ser_driver_retval %d\n", fpin, selectval, inportisset, fpout, selectval, outportisset, ser_driver_retval);
 		printf("%#hhx %#hhx  %#hhx %.1f %.1f %#hhx %#hhx %#hhx %hhu %hhu %hhu %#hhx %hhu %hhu %hhu %hhu %hhu %hhu %hhu %hhu %hhu %hhu %hhu %hhu %hhu %hhu %hhu %hhu %hhu %hhu\n", 
@@ -1385,13 +1540,16 @@ readBuff->data[5] = 0xff;
 	return 0;
 }
 
-#define FREE	1
+#define FREE	255
+#define FLASH	254
 #define max(x, y)	((x) > (y) ? (x) : (y))
 
-int spat2battelle(raw_signal_status_msg_t *ca_spat, spat_ntcip_mib_t *battelle_spat, phase_timing_t *phase_timing[8], int verbose) {
+int build_spat(sig_plan_msg_t *sig_plan_msg, raw_signal_status_msg_t *ca_spat, phase_timing_t *phase_timing[8], get_long_status8_resp_mess_typ *long_status8, plan_params_t *plan_params[MAX_PLANS], battelle_spat_t *battelle_spat, int verbose) {
 
 	unsigned char Max_Green[8];
 	unsigned char Min_Green[8];
+	unsigned char active_phaseA;
+	unsigned char active_phaseB;
 	int i;
 	int j;
 	int Coord_plan = FREE;
@@ -1403,28 +1561,49 @@ int spat2battelle(raw_signal_status_msg_t *ca_spat, spat_ntcip_mib_t *battelle_s
 	unsigned char interval;
 	timestamp_t ts;
 	int tstemp;
+	memset(sig_plan_msg, 0, sizeof(sig_plan_msg_t));
 
-	memset(battelle_spat, 0, sizeof(spat_ntcip_mib_t));
-
-	battelle_spat->msg_id = 0xcd;
-	battelle_spat->num_phases = 16;
-	battelle_spat->TimebaseAscActionStatus = ca_spat->plan_num;
-	if(ca_spat->preempt != 0) 
-		battelle_spat->IntersectionStatus |= 0x04;
+	sig_plan_msg->internal_msg_header = 0xffff;
+	sig_plan_msg->msg_id = 0x01;
 	get_current_timestamp(&ts);
-	tstemp = (3600 * ts.hour) + (60 * ts.min) + ts.sec;
-	battelle_spat->SystemSeconds[0] = (tstemp & 0xff);
-	battelle_spat->SystemSeconds[1] = (tstemp >> 8) & 0xff;
-	battelle_spat->SystemSeconds[2] = (tstemp >> 16) & 0xff;
-	battelle_spat->SystemMilliSeconds = ts.millisec;
+	tstemp = (1000 * ((3600 * ts.hour) + (60 * ts.min) + ts.sec)) + ts.millisec;
+	sig_plan_msg->ms_since_midnight = tstemp;
+	sig_plan_msg->phase_timing_params.obj_id = 0x01;
+	sig_plan_msg->phase_timing_params.size = 0x31;
 
+//MUST FIX!! This is either at 0x01F0, or from Page2 GetPhaseFlags sig_plan_msg->phase_timing_params.permitted_phases = ?????;
+
+	sig_plan_msg->coordination_plan_params.obj_id = 0x02;
+	sig_plan_msg->coordination_plan_params.size = 0x0c;
+	sig_plan_msg->coordination_plan_params.cycle_length = 0x0c;
+	sig_plan_msg->coordination_plan_params.plan_num = long_status8->pattern;
+	if(long_status8->pattern < 254){
+		sig_plan_msg->coordination_plan_params.cycle_length = plan_params[long_status8->pattern]->cycle_length;
+
+//MUST FIX!! WHICH offset (viz. A, B, or C) is determined by the TOD table used. Here, I'm just picking offsetA
+//for the sake of debugging
+		sig_plan_msg->coordination_plan_params.offset = plan_params[long_status8->pattern]->offsetA;
+	}
+
+	sig_plan_msg->coordination_plan_params.coord_phase = ca_spat->active_phase;
+
+	battelle_spat->intersection_id = 0x01;
+	battelle_spat->intersection_id_size = 0x04;
+
+	battelle_spat->message_timestamp.obj_id = 0x03;
+	battelle_spat->message_timestamp.size = 0x05;
+	battelle_spat->message_timestamp.timestamp_sec = (3600 * ts.hour) + (60 * ts.min) + ts.sec;
+	battelle_spat->message_timestamp.timestamp_tenths = ts.millisec/100;
+
+	battelle_spat->movement[0].obj_id = 0x04;
+	battelle_spat->movement[0].lane_set.obj_id = 0x05;
 
 /* Calculation of "Time to change":
 **	Red->Green, active phase = 1, nonactive phase = 4
 **	Ring_A = 1,2,3,4 Ring_B = 5,6,7,8
 */
 	if(verbose) {
-		printf("spat2battelle: active_phase %#hhx next_phase %#hhx intvlA %#hhx intvlB %#hhx timerA %hhu timerB %hhu veh_call %#hhx master clock %hhu\n",
+		printf("build_spat: active_phase %#hhx next_phase %#hhx intvlA %#hhx intvlB %#hhx timerA %hhu timerB %hhu veh_call %#hhx master clock %hhu\n",
 			ca_spat->active_phase,
 			ca_spat->next_phase ,
 			ca_spat->interval_A ,
@@ -1436,68 +1615,88 @@ int spat2battelle(raw_signal_status_msg_t *ca_spat, spat_ntcip_mib_t *battelle_s
 		);
 	}
 
-    if(Coord_plan == FREE) {
-	    for(i=0; i<8; i++) {
+    if(long_status8->pattern == FREE) {
+	    for(i=0; i<MAX_PHASES; i++) {
 		j = 1 << i;
-		battelle_spat->time_to_change[i].phase = i + 1;
 
+		sig_plan_msg->phase_timing_params.min_green[i] = phase_timing[i]->min_green;
+		sig_plan_msg->phase_timing_params.max_green[i] = phase_timing[i]->max_green1;
+		sig_plan_msg->phase_timing_params.ped_walk[i] = phase_timing[i]->walk_1;
+		sig_plan_msg->phase_timing_params.ped_clr[i] = phase_timing[i]->dont_walk;
+		sig_plan_msg->phase_timing_params.yellow[i] = phase_timing[i]->yellow;
+		sig_plan_msg->phase_timing_params.red_clr[i] = phase_timing[i]->all_red;
+		if(long_status8->pattern < 254)
+			sig_plan_msg->coordination_plan_params.green_factor[i] = plan_params[long_status8->pattern]->green_factor[i];
 
-		if(ca_spat->active_phase & j) { //Active phase calculations
-			battelle_spat->time_to_change[i].VehMinTimeToChange = (i<4) ? ca_spat->intvA_timer : ca_spat->intvB_timer;
-			interval = (i<4) ? ca_spat->interval_A : ca_spat->interval_B;
-			battelle_spat->PhaseStatusYellow |= (yellows[interval] << i);
-			battelle_spat->PhaseStatusGreens |= (greens[interval] << i);
-			battelle_spat->PhaseStatusReds = ~(battelle_spat->PhaseStatusYellow | battelle_spat->PhaseStatusGreens);
-			battelle_spat->PhaseStatusWalks |= (walks[interval] << i);
-			battelle_spat->PhaseStatusPedClears |= battelle_spat->PhaseStatusWalks | (flash_dont_walks[interval] << i);
-			battelle_spat->PhaseStatusDontWalks = ~battelle_spat->PhaseStatusPedClears;
-			if(verbose)
-				printf("\n\nPhase %d VehMinTimeToChange %hu intrvl %#hhx veh_call %#hhx ped_call %#hhx\n\n", i+1, battelle_spat->time_to_change[i].VehMinTimeToChange/interval_divisor[interval], interval, ca_spat->veh_call, ca_spat->ped_call);
-		}
+		interval = (i<4) ? ca_spat->interval_A : ca_spat->interval_B;
 		Max_Green[i] = (ca_spat->veh_call & j) ? (phase_timing[i]->max_green1 + phase_timing[i]->min_green) : 0;
 		Min_Green[i] = (ca_spat->veh_call & j) ? (phase_timing[i]->add_per_veh/10 + phase_timing[i]->min_green) : 0;
-		if(verbose) {
-			printf("veh_call %#hhx max_green1(%d) %hhu yellow(%d) %hhu all-red(%d) %hhu min_green(%d) %hhu add_per_veh(%d) %hhu Max_Green(%d) %hu Min_Green(%d) %hhu\n",
-			ca_spat->veh_call, 
-			i+1, phase_timing[i]->max_green1, 
-			i+1, phase_timing[i]->yellow,
-			i+1, phase_timing[i]->all_red,
-			i+1, phase_timing[i]->min_green,
-			i+1, phase_timing[i]->add_per_veh,
-			i+1, Max_Green[i],
-			i+1, Min_Green[i]
-			);
+
+		if(ca_spat->active_phase & j) { //Active phase calculations
+			battelle_spat->movement[i].min_time_remaining.mintimeremaining = (i<4) ? ca_spat->intvA_timer : ca_spat->intvB_timer;
+			battelle_spat->movement[i].max_time_remaining.maxtimeremaining = battelle_spat->movement[i].min_time_remaining.mintimeremaining;
+
+			if(interval == 0x07) {
+				battelle_spat->movement[i].min_time_remaining.mintimeremaining =
+					(10 * phase_timing[i]->max_green1) - (phase_timing[i]->max_gap - ca_spat->intvA_timer);
+			}
+			Max_Green[i] = battelle_spat->movement[i].min_time_remaining.mintimeremaining; 
+			Min_Green[i] = battelle_spat->movement[i].min_time_remaining.mintimeremaining; 
+			if(verbose)
+				printf("\n\nPhase %d min_time_remaining %hu intrvl %#hhx veh_call %#hhx ped_call %#hhx\n\n", 
+					i+1, 
+					battelle_spat->movement[i].min_time_remaining.mintimeremaining/interval_divisor[interval], 
+					interval, 
+					ca_spat->veh_call, 
+					ca_spat->ped_call
+				);
 		}
 		//This is wrong! The max/min time to change for the CURRENT phase is whatever the counter says.
 		//But this is the beginning of creating a matrix of max/min time to change for each phase.
 		// This calculation creates the max time to change for 
-		battelle_spat->time_to_change[i].VehMaxTimeToChange = 
-		( (10*max(Max_Green[(i+1)%4], Max_Green[(i+1)%8])) + max(phase_timing[(i+1)%4]->yellow, phase_timing[(i+1)%8]->yellow) + max(phase_timing[(i+1)%4]->all_red, phase_timing[(i+1)%8]->all_red) +
-		(10*max(Max_Green[(i+2)%4], Max_Green[(i+2)%8])) + max(phase_timing[(i+2)%4]->yellow, phase_timing[(i+2)%8]->yellow) + max(phase_timing[(i+2)%4]->all_red, phase_timing[(i+2)%8]->all_red) +
-		(10*max(Max_Green[(i+3)%4], Max_Green[(i+3)%8])) + max(phase_timing[(i+3)%4]->yellow, phase_timing[(i+3)%8]->yellow) + max(phase_timing[(i+3)%4]->all_red, phase_timing[(i+3)%8]->all_red) )/10;
+//		if(!(ca_spat->active_phase & j))  //Active phase calculations
+		else {
+			battelle_spat->movement[i].max_time_remaining.maxtimeremaining = 
+
+				( (10*max(Max_Green[(i+1)%4], Max_Green[(i+1)%8])) + 
+				max(phase_timing[(i+1)%4]->yellow, phase_timing[(i+1)%8]->yellow) + 
+				max(phase_timing[(i+1)%4]->all_red, phase_timing[(i+1)%8]->all_red) +
+
+				(10*max(Max_Green[(i+2)%4], Max_Green[(i+2)%8])) + 
+				max(phase_timing[(i+2)%4]->yellow, phase_timing[(i+2)%8]->yellow) + 
+				max(phase_timing[(i+2)%4]->all_red, phase_timing[(i+2)%8]->all_red) +
+
+				(10*max(Max_Green[(i+3)%4], Max_Green[(i+3)%8])) + 
+				max(phase_timing[(i+3)%4]->yellow, phase_timing[(i+3)%8]->yellow) + 
+				max(phase_timing[(i+3)%4]->all_red, phase_timing[(i+3)%8]->all_red) )/10;
+
+			if(verbose) {
+				printf("build_spat: battelle_spat->movement[%d].max_time_remaining.maxtimeremaining %d\n",
+					i, battelle_spat->movement[i].max_time_remaining.maxtimeremaining); 
+			}
+	    	}
 		if(verbose) {
-			printf("spat2battelle: Got to 5 battelle_spat->time_to_change[%d] %d\n",
-				i, battelle_spat->time_to_change[3].VehMaxTimeToChange);
-	    }
+			printf("veh_call %#hhx max_green1(%d) %hhu yellow(%d) %hhu all-red(%d) %hhu min_green(%d) %hhu add_per_veh(%d) %hhu Max_Green(%d) %hu Min_Green(%d) %hhu\n",
+				ca_spat->veh_call, 
+				i+1, phase_timing[i]->max_green1, 
+				i+1, phase_timing[i]->yellow,
+				i+1, phase_timing[i]->all_red,
+				i+1, phase_timing[i]->min_green,
+				i+1, phase_timing[i]->add_per_veh,
+				i+1, Max_Green[i],
+				i+1, Min_Green[i]
+			);
+			printf("   active_phase %#hhx intvA %#hhx intvB %#hhx\n",
+				ca_spat->active_phase,
+				ca_spat->interval_A,
+				ca_spat->interval_B
+			);
+			printf("   tstemp %u %hu\n",
+				tstemp
+				,sig_plan_msg->ms_since_midnight
+			);
+		}
 	}
-	printf("   PhaseStatusReds %#hx PhaseStatusYellow %#hx PhaseStatusGreens %#hx active_phase %#hhx intvA %#hhx intvB %#hhx\n",
-		battelle_spat->PhaseStatusReds,
-		battelle_spat->PhaseStatusYellow,
-		battelle_spat->PhaseStatusGreens,
-		ca_spat->active_phase,
-		ca_spat->interval_A,
-		ca_spat->interval_B
-	);
-	printf("   PhaseStatusDontWalks %#hx PhaseStatusPedClears %#hx PhaseStatusWalks %#hx SystemSeconds %u tstemp %u %hu\n",
-		battelle_spat->PhaseStatusDontWalks,
-		battelle_spat->PhaseStatusPedClears,
-		battelle_spat->PhaseStatusWalks,
-		battelle_spat->SystemSeconds[0]|
-		(battelle_spat->SystemSeconds[1] << 8)|
-		(battelle_spat->SystemSeconds[2] << 16),
-		tstemp,
-		battelle_spat->SystemMilliSeconds
-	);
 
 
     }
