@@ -212,10 +212,6 @@ int main(int argc, char *argv[]) {
 
 
 		if (setjmp(exit_env) != 0) {
-
-			if(retval < 0) 
-				check_retval = check_and_reconnect_serial(retval, &ab3418_fdin, &ab3418_fdout, ab3418_port);
-				check_retval = check_and_reconnect_serial(retval, &ca_spat_fdin, &ca_spat_fdout, ca_spat_port);
                 	if(ab3418_fdin)
                        		close(ab3418_fdin);
                 	if(ab3418_fdout)
@@ -226,9 +222,7 @@ int main(int argc, char *argv[]) {
                        		close(ca_spat_fdout);
 			exit(EXIT_SUCCESS);
 		} else {
-printf("ab3418commudp: Got to 1\n");
-//			sig_ign(&sig_list[0], sig_hand);
-printf("ab3418commudp: Got to 2 ca_spat_port %s\n", ca_spat_port);
+			sig_ign(sig_list, sig_hand);
 		}
 
 
