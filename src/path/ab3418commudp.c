@@ -53,6 +53,7 @@ int main(int argc, char *argv[]) {
 	phase_timing_t *pphase_timing[MAX_PHASES];
 	raw_signal_status_msg_t raw_signal_status_msg;
 	plan_params_t plan_params[MAX_PLANS + 1]; //Plan[0]=Free, Plan[10]=Saved plan
+	plan_params_t *pplan_params[MAX_PLANS + 1];
 	battelle_spat_t battelle_spat;
 	char *pbattelle_spat;
 	mschedule_t mschedule;
@@ -87,8 +88,8 @@ int main(int argc, char *argv[]) {
 //	unsigned char new_phase_assignment;	
 	unsigned char output_spat_binary = 0;
 
-        int sd_out = -5;             /// socket descriptor for UDP send
-        short udp_out_port = 0;    /// set from command line option
+	int sd_out = -5;             /// socket descriptor for UDP send
+        short udp_out_port = -1;    /// set from command line option
         char *udp_out_name = "127.0.0.1";  /// address of UDP destination
         int bytes_sent;         /// returned from sendto
  
@@ -100,11 +101,12 @@ int main(int argc, char *argv[]) {
 	fd_set writefds, writefds_sav;
 	int maxfd = 0;
 	int numready;
+	int use_tcp = 0;
 
  
 	pbattelle_spat = (char *)&battelle_spat;
 
-        while ((opt = getopt(argc, argv, "A:S:vi:na:bo:s:l:h:z")) != -1)
+        while ((opt = getopt(argc, argv, "A:S:vi:tna:bo:s:l:h:z")) != -1)
         {
                 switch (opt)
                 {
@@ -121,6 +123,9 @@ int main(int argc, char *argv[]) {
                         break;
                   case 'i':
                         udp_in_port = (short)atoi(optarg);
+                        break;
+                  case 't':
+                        use_tcp = 1;
                         break;
                   case 'n':
                         no_control = 1;
@@ -145,7 +150,7 @@ int main(int argc, char *argv[]) {
                         break;
 		  case 'z':
 		  default:
-			fprintf(stderr, "Usage: %s -A <AB3418 port, (def. /dev/ttyS0)> -S <CA SPaT port, (def. /dev/ttyS1)> -v (verbose) -i <UDP input port> -b (output binary SPaT message) -s <UDP unicast destination (def. 127.0.0.1)> -o <UDP unicast port> -l <lowest Battelle byte to display> -h <highest Battelle byte to display>\n", argv[0]);
+			fprintf(stderr, "Usage: %s -A <AB3418 port, (def. /dev/ttyS0)> -S <CA SPaT port, (def. /dev/ttyS1)> -v (verbose) -i <UDP/TCP input port, def. UDP> -t (use TCP) -b (output binary SPaT message) -s <UDP unicast destination (def. 127.0.0.1)> -o <UDP unicast port> -l <lowest Battelle byte to display> -h <highest Battelle byte to display>\n", argv[0]);
 			exit(EXIT_FAILURE);
 		}
 	}
@@ -165,6 +170,8 @@ int main(int argc, char *argv[]) {
 	memset(&snd_addr, 0, sizeof(snd_addr));
 	for(i=0; i<MAX_PHASES; i++) 
 		pphase_timing[i] = &phase_timing[i];
+	for(i=0; i<MAX_PLANS+1; i++) 
+		pplan_params[i] = &plan_params[i];
 
 	if( udp_out_port >= 0  ) {
 		fprintf(stderr, "Opening UDP unicast to destination %s port %hu\n",
@@ -298,7 +305,7 @@ while(1) {
 		retval = get_status(wait_for_data, &readBuff, ab3418_fdin, ab3418_fdout, verbose);
 		retval = get_spat(wait_for_data, &raw_signal_status_msg, ca_spat_fdin, verbose, output_spat_binary);
 		memcpy(&long_status8, &readBuff, sizeof(get_long_status8_resp_mess_typ));
-		retval = build_spat(&sig_plan_msg, &raw_signal_status_msg, pphase_timing, &long_status8, &plan_params[0], &battelle_spat, verbose);
+		retval = build_spat(&sig_plan_msg, &raw_signal_status_msg, pphase_timing, &long_status8, pplan_params, &battelle_spat, verbose);
 		snd_addr.sin_port = temp_port;
 		snd_addr.sin_addr.s_addr = temp_addr;
 		if(low_battelle >= 0) {
@@ -344,43 +351,18 @@ no_control = 0;
 	}
 
 	if(output_spat_binary) {
-	bytes_sent = sendto(sd_out, &raw_signal_status_msg.active_phase, sizeof(raw_signal_status_msg_t) - 9, 0,
-		(struct sockaddr *) &snd_addr, sizeof(snd_addr));
+		bytes_sent = sendto(sd_out, &battelle_spat, sizeof(battelle_spat_t), 0,
+			(struct sockaddr *) &snd_addr, sizeof(snd_addr));
 	}
 	else {
 		memset(strbuf, 0, sizeof(strbuf));
-                sprintf(strbuf, "%#hhx %#hhx  %#hhx %.1f %.1f %#hhx %#hhx %#hhx %hhu %hhu %hhu %#hhx %hhu %hhu %hhu %hhu %hhu %hhu %hhu %hhu %hhu %hhu %hhu %hhu %hhu %hhu %hhu %hhu %hhu %hhu\n",
-                        raw_signal_status_msg.active_phase,
-                        raw_signal_status_msg.interval_A,
-                        raw_signal_status_msg.interval_B,
-                        raw_signal_status_msg.intvA_timer/10.0,
-                        raw_signal_status_msg.intvB_timer/10.0,
-                        raw_signal_status_msg.next_phase,
-                        raw_signal_status_msg.ped_call,
-                        raw_signal_status_msg.veh_call,
-                        raw_signal_status_msg.plan_num,
-                        raw_signal_status_msg.local_cycle_clock,
-                        raw_signal_status_msg.master_cycle_clock,
-                        raw_signal_status_msg.preempt,
-                        raw_signal_status_msg.permissive[0],
-                        raw_signal_status_msg.permissive[1],
-                        raw_signal_status_msg.permissive[2],
-                        raw_signal_status_msg.permissive[3],
-                        raw_signal_status_msg.permissive[4],
-                        raw_signal_status_msg.permissive[5],
-                        raw_signal_status_msg.permissive[6],
-                        raw_signal_status_msg.permissive[7],
-                        raw_signal_status_msg.force_off_A,
-                        raw_signal_status_msg.force_off_B,
-                        raw_signal_status_msg.ped_permissive[0],
-                        raw_signal_status_msg.ped_permissive[1],
-                        raw_signal_status_msg.ped_permissive[2],
-                        raw_signal_status_msg.ped_permissive[3],
-                        raw_signal_status_msg.ped_permissive[4],
-                        raw_signal_status_msg.ped_permissive[5],
-                        raw_signal_status_msg.ped_permissive[6],
-                        raw_signal_status_msg.ped_permissive[7]
+		for(i=0; i<8; i++)
+                sprintf(strbuf+(12*i), "#%u %hhu %hhu ",
+			i+1,
+                        battelle_spat.movement[i].min_time_remaining.mintimeremaining,
+                        battelle_spat.movement[i].max_time_remaining.maxtimeremaining
                 );
+                sprintf(strbuf+(12*(i+1))+1, "\n");
 		bytes_sent = sendto(sd_out, strbuf, sizeof(strbuf), 0,
 		     (struct sockaddr *) &snd_addr, sizeof(snd_addr));
 	}
@@ -401,24 +383,6 @@ no_control = 0;
 //		fflush(stdout);
 //	}
 
-//        ftime ( &timeptr_raw );
-//        localtime_r ( &timeptr_raw.time, &time_converted );
-//	printf("Time %02d:%02d:%02d.%03d\n",
-//		time_converted.tm_hour,
-//		time_converted.tm_min,
-//		time_converted.tm_sec,
-//		timeptr_raw.millitm);
-
-		else {	
-			retval = get_status(wait_for_data, &readBuff, ab3418_fdin, ab3418_fdout, verbose);
-			memcpy(&long_status8, &readBuff, sizeof(get_long_status8_resp_mess_typ)); 
-			if(retval < 0) 
-				check_retval = check_and_reconnect_serial(retval, &ab3418_fdin, &ab3418_fdout, ab3418_port);
-			if(verbose) 
-				print_status( (get_long_status8_resp_mess_typ *)&readBuff);
-				if(retval < 0) 
-					printf("get_status returned negative value: %d\n", retval);
-		}
 		if(verbose) {
 			clock_gettime(CLOCK_REALTIME, &end_time);
 			printf("%s: Time for function call %f sec\n", argv[0], 

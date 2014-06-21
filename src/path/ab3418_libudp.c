@@ -777,7 +777,6 @@ int set_coord_params(plan_params_t *plan_params, int plan_num, mschedule_t *msch
 	int ser_driver_retval;
 	get_controller_timing_data_request_t get_controller_timing_data_request_mess;
 	gen_mess_typ readBuff;
-	int retval;
 	int i;
 	char coord_plan_msg_buf[37];
 
@@ -961,17 +960,6 @@ int get_spat(int wait_for_data, raw_signal_status_msg_t *praw_signal_status_msg,
 			return -1;
 		}
 	}
-
-        if( (readBuff->data[6] != 0xc) &&
-                (readBuff->data[6] != 0x7) &&
-                (readBuff->data[6] != 0xd) &&
-                (readBuff->data[6] != 0xf))
-                readBuff->data[8] *= 10;
-        if( (readBuff->data[7] != 0xc) &&
-                (readBuff->data[7] != 0x7) &&
-                (readBuff->data[7] != 0xd) &&
-                (readBuff->data[7] != 0xf))
-                readBuff->data[9] *= 10;
 
 	if(print_packed_binary != 0)
 		write(STDOUT_FILENO, &readBuff->data[5], sizeof(raw_signal_status_msg_t) - 9);
@@ -1544,7 +1532,7 @@ readBuff->data[5] = 0xff;
 #define FLASH	254
 #define max(x, y)	((x) > (y) ? (x) : (y))
 
-int build_spat(sig_plan_msg_t *sig_plan_msg, raw_signal_status_msg_t *ca_spat, phase_timing_t *phase_timing[8], get_long_status8_resp_mess_typ *long_status8, plan_params_t *plan_params[MAX_PLANS], battelle_spat_t *battelle_spat, int verbose) {
+int build_spat(sig_plan_msg_t *sig_plan_msg, raw_signal_status_msg_t *ca_spat, phase_timing_t *phase_timing[], get_long_status8_resp_mess_typ *long_status8, plan_params_t *plan_params[], battelle_spat_t *battelle_spat, int verbose) {
 
 	unsigned char Max_Green[8];
 	unsigned char Min_Green[8];
@@ -1552,15 +1540,17 @@ int build_spat(sig_plan_msg_t *sig_plan_msg, raw_signal_status_msg_t *ca_spat, p
 	unsigned char active_phaseB;
 	int i;
 	int j;
-	int Coord_plan = FREE;
-	unsigned char interval_divisor[] = {10,10,10,10,1,1,1,1,10,10,10,10,10,10,10,10};
+	unsigned char interval_multiplier[] = {1,1,10,1,10,10,10,10,1,1,1,1,1,1,1,1};
 	unsigned char greens[] =  { 1, 0, 1, 0, 1, 1, 1, 1, 0, 0, 0, 0, 0, 0, 0, 0};
 	unsigned char yellows[] = { 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 1, 0, 0};
 	unsigned char walks[] = { 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0};
 	unsigned char flash_dont_walks[] = { 0, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0};
 	unsigned char interval;
+	unsigned char countdown_timer;
 	timestamp_t ts;
 	int tstemp;
+	static int reduce_gap_start_time[MAX_PHASES];
+
 	memset(sig_plan_msg, 0, sizeof(sig_plan_msg_t));
 
 	sig_plan_msg->internal_msg_header = 0xffff;
@@ -1575,7 +1565,6 @@ int build_spat(sig_plan_msg_t *sig_plan_msg, raw_signal_status_msg_t *ca_spat, p
 
 	sig_plan_msg->coordination_plan_params.obj_id = 0x02;
 	sig_plan_msg->coordination_plan_params.size = 0x0c;
-	sig_plan_msg->coordination_plan_params.cycle_length = 0x0c;
 	sig_plan_msg->coordination_plan_params.plan_num = long_status8->pattern;
 	if(long_status8->pattern < 254){
 		sig_plan_msg->coordination_plan_params.cycle_length = plan_params[long_status8->pattern]->cycle_length;
@@ -1595,8 +1584,6 @@ int build_spat(sig_plan_msg_t *sig_plan_msg, raw_signal_status_msg_t *ca_spat, p
 	battelle_spat->message_timestamp.timestamp_sec = (3600 * ts.hour) + (60 * ts.min) + ts.sec;
 	battelle_spat->message_timestamp.timestamp_tenths = ts.millisec/100;
 
-	battelle_spat->movement[0].obj_id = 0x04;
-	battelle_spat->movement[0].lane_set.obj_id = 0x05;
 
 /* Calculation of "Time to change":
 **	Red->Green, active phase = 1, nonactive phase = 4
@@ -1615,7 +1602,8 @@ int build_spat(sig_plan_msg_t *sig_plan_msg, raw_signal_status_msg_t *ca_spat, p
 		);
 	}
 
-    if(long_status8->pattern == FREE) {
+//    if(long_status8->pattern == FREE) 	
+	{
 	    for(i=0; i<MAX_PHASES; i++) {
 		j = 1 << i;
 
@@ -1633,28 +1621,39 @@ int build_spat(sig_plan_msg_t *sig_plan_msg, raw_signal_status_msg_t *ca_spat, p
 		Min_Green[i] = (ca_spat->veh_call & j) ? (phase_timing[i]->add_per_veh/10 + phase_timing[i]->min_green) : 0;
 
 		if(ca_spat->active_phase & j) { //Active phase calculations
-			battelle_spat->movement[i].min_time_remaining.mintimeremaining = (i<4) ? ca_spat->intvA_timer : ca_spat->intvB_timer;
-			battelle_spat->movement[i].max_time_remaining.maxtimeremaining = battelle_spat->movement[i].min_time_remaining.mintimeremaining;
+			battelle_spat->movement[i].obj_id = 0x04;
+			battelle_spat->movement[i].lane_set.obj_id = 0x05;
 
 			if(interval == 0x07) {
-				battelle_spat->movement[i].min_time_remaining.mintimeremaining =
-					(10 * phase_timing[i]->max_green1) - (phase_timing[i]->max_gap - ca_spat->intvA_timer);
+				if(reduce_gap_start_time[i] != 0)
+					battelle_spat->movement[i].min_time_remaining.mintimeremaining = 
+						(10 * phase_timing[i]->max_green1) - ((tstemp - reduce_gap_start_time[i])/100);
+				else {
+					battelle_spat->movement[i].min_time_remaining.mintimeremaining = 
+						10 * phase_timing[i]->max_green1;
+					reduce_gap_start_time[i] = tstemp;
+				}
 			}
+			else {
+				countdown_timer = (i<4) ? ca_spat->intvA_timer : ca_spat->intvB_timer;
+				battelle_spat->movement[i].min_time_remaining.mintimeremaining = interval_multiplier[interval] * countdown_timer;
+				battelle_spat->movement[i].max_time_remaining.maxtimeremaining = battelle_spat->movement[i].min_time_remaining.mintimeremaining;
+				reduce_gap_start_time[i] = 0;
+			}
+printf("timer for movement %d %d interval %hhx\n", i+1, battelle_spat->movement[i].min_time_remaining.mintimeremaining, interval);
+		
 			Max_Green[i] = battelle_spat->movement[i].min_time_remaining.mintimeremaining; 
 			Min_Green[i] = battelle_spat->movement[i].min_time_remaining.mintimeremaining; 
 			if(verbose)
 				printf("\n\nPhase %d min_time_remaining %hu intrvl %#hhx veh_call %#hhx ped_call %#hhx\n\n", 
 					i+1, 
-					battelle_spat->movement[i].min_time_remaining.mintimeremaining/interval_divisor[interval], 
+					battelle_spat->movement[i].min_time_remaining.mintimeremaining*interval_multiplier[interval], 
 					interval, 
 					ca_spat->veh_call, 
 					ca_spat->ped_call
 				);
 		}
-		//This is wrong! The max/min time to change for the CURRENT phase is whatever the counter says.
-		//But this is the beginning of creating a matrix of max/min time to change for each phase.
-		// This calculation creates the max time to change for 
-//		if(!(ca_spat->active_phase & j))  //Active phase calculations
+/*
 		else {
 			battelle_spat->movement[i].max_time_remaining.maxtimeremaining = 
 
@@ -1675,6 +1674,7 @@ int build_spat(sig_plan_msg_t *sig_plan_msg, raw_signal_status_msg_t *ca_spat, p
 					i, battelle_spat->movement[i].max_time_remaining.maxtimeremaining); 
 			}
 	    	}
+*/
 		if(verbose) {
 			printf("veh_call %#hhx max_green1(%d) %hhu yellow(%d) %hhu all-red(%d) %hhu min_green(%d) %hhu add_per_veh(%d) %hhu Max_Green(%d) %hu Min_Green(%d) %hhu\n",
 				ca_spat->veh_call, 
@@ -1700,6 +1700,9 @@ int build_spat(sig_plan_msg_t *sig_plan_msg, raw_signal_status_msg_t *ca_spat, p
 
 
     }
+//    else{
+//	printf("Coordination plan is not FREE, it is %d\n", long_status8->pattern);
+//    }
 
 	return 0;
 }
