@@ -53,6 +53,8 @@ int get_request(unsigned char msg_type, unsigned char page, unsigned char block,
 int spat2battelle(raw_signal_status_msg_t *ca_spat, battelle_spat_t *battelle_spat, phase_timing_t *phase_timing[8], int verbose);
 int get_coord_params(plan_params_t *plan_params, int plan_num, int wait_for_data, int *fpout, int *fpin, char verbose);
 int set_coord_params(plan_params_t *plan_params, int plan_num, mschedule_t *mschedule, int wait_for_data, int fdout, int fdin, char verbose);
+int build_sigplanmsg(sig_plan_msg_t *sig_plan_msg, phase_timing_t *phase_timing[], plan_params_t *current_plan_params,get_long_status8_resp_mess_typ *long_status8, int verbose);
+
 
 char *timing_strings[] = {
         "Walk_1",
@@ -933,12 +935,6 @@ int get_spat(int wait_for_data, raw_signal_status_msg_t *praw_signal_status_msg,
 	int ser_driver_retval;
 	gen_mess_typ *readBuff = (gen_mess_typ *)praw_signal_status_msg;
 
-	// As of TSCP 2.20, build 117, the user may select SPAT messages on a
-	// serial/network port. The 2070 controller will start transmitting SPAT
-	// messages at a 200 ms period.  If this is selected, no AB3418 request
-	// is needed; one just reads the port. But the SPAT message may also be
-	// requested via an AB3418 request. Thus the "make_ab3418_request" flag.
-
 	ser_driver_retval = 100;
 
 	if(wait_for_data && praw_signal_status_msg) {
@@ -960,14 +956,13 @@ int get_spat(int wait_for_data, raw_signal_status_msg_t *praw_signal_status_msg,
 			return -1;
 		}
 	}
-
 	if(print_packed_binary != 0)
 		write(STDOUT_FILENO, &readBuff->data[5], sizeof(raw_signal_status_msg_t) - 9);
 	else
 	if(verbose != 0) 
 	{
 //		printf("get_spat 6-end: fpin %d selectval %d inportisset %s fpout %d selectval %d outportisset %s ser_driver_retval %d\n", fpin, selectval, inportisset, fpout, selectval, outportisset, ser_driver_retval);
-		printf("%#hhx %#hhx  %#hhx %.1f %.1f %#hhx %#hhx %#hhx %hhu %hhu %hhu %#hhx %hhu %hhu %hhu %hhu %hhu %hhu %hhu %hhu %hhu %hhu %hhu %hhu %hhu %hhu %hhu %hhu %hhu %hhu\n", 
+		printf("get_spat 7: %#hhx %#hhx  %#hhx %.1f %.1f %#hhx %#hhx %#hhx %hhu %hhu %hhu %#hhx %hhu %hhu %hhu %hhu %hhu %hhu %hhu %hhu %hhu %hhu %hhu %hhu %hhu %hhu %hhu %hhu %hhu %hhu\n", 
 			praw_signal_status_msg->active_phase,
 			praw_signal_status_msg->interval_A,
 			praw_signal_status_msg->interval_B,
@@ -1531,6 +1526,10 @@ readBuff->data[5] = 0xff;
 #define FREE	255
 #define FLASH	254
 #define max(x, y)	((x) > (y) ? (x) : (y))
+#define min(x, y)	((x) < (y) ? (x) : (y))
+#define RED	0
+#define YELLOW	1
+#define GREEN	2
 
 int build_spat(sig_plan_msg_t *sig_plan_msg, raw_signal_status_msg_t *ca_spat, phase_timing_t *phase_timing[], get_long_status8_resp_mess_typ *long_status8, plan_params_t *plan_params[], battelle_spat_t *battelle_spat, int verbose) {
 
@@ -1538,46 +1537,45 @@ int build_spat(sig_plan_msg_t *sig_plan_msg, raw_signal_status_msg_t *ca_spat, p
 	unsigned char Min_Green[8];
 	unsigned char active_phaseA;
 	unsigned char active_phaseB;
+	unsigned char start_index_phaseA;
+	unsigned char start_index_phaseB;
 	int i;
 	int j;
 	unsigned char interval_multiplier[] = {1,1,10,1,10,10,10,10,1,1,1,1,1,1,1,1};
 	unsigned char greens[] =  { 1, 0, 1, 0, 1, 1, 1, 1, 0, 0, 0, 0, 0, 0, 0, 0};
 	unsigned char yellows[] = { 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 1, 0, 0};
+	unsigned char colors[] = { GREEN, RED, GREEN, RED, GREEN, GREEN, GREEN, GREEN, RED, RED, RED, RED, YELLOW, YELLOW, RED, RED};
 	unsigned char walks[] = { 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0};
 	unsigned char flash_dont_walks[] = { 0, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0};
 	unsigned char interval;
 	unsigned char countdown_timer;
+	unsigned char force_off;
+	unsigned char curr_plan_num;
+	int time_to_next_phase[MAX_PHASES];
+	int total_time_to_next_phase[MAX_PHASES];
 	timestamp_t ts;
 	int tstemp;
-	static int reduce_gap_start_time[MAX_PHASES];
+	static int reduce_gap_start_time[MAX_PHASES] = {0,0,0,0,0,0,0,0};
+	unsigned char phase_sequence[MAX_PHASES];
+	unsigned char *offset_str[] = {"A", "B", "C"};
 
 	memset(sig_plan_msg, 0, sizeof(sig_plan_msg_t));
+	memset(time_to_next_phase, 0, sizeof(time_to_next_phase));
+	memset(total_time_to_next_phase, 0, sizeof(total_time_to_next_phase));
 
-	sig_plan_msg->internal_msg_header = 0xffff;
-	sig_plan_msg->msg_id = 0x01;
 	get_current_timestamp(&ts);
 	tstemp = (1000 * ((3600 * ts.hour) + (60 * ts.min) + ts.sec)) + ts.millisec;
-	sig_plan_msg->ms_since_midnight = tstemp;
-	sig_plan_msg->phase_timing_params.obj_id = 0x01;
-	sig_plan_msg->phase_timing_params.size = 0x31;
 
-//MUST FIX!! This is either at 0x01F0, or from Page2 GetPhaseFlags sig_plan_msg->phase_timing_params.permitted_phases = ?????;
-
-	sig_plan_msg->coordination_plan_params.obj_id = 0x02;
-	sig_plan_msg->coordination_plan_params.size = 0x0c;
-	sig_plan_msg->coordination_plan_params.plan_num = long_status8->pattern;
-	if(long_status8->pattern < 254){
-		sig_plan_msg->coordination_plan_params.cycle_length = plan_params[long_status8->pattern]->cycle_length;
-
-//MUST FIX!! WHICH offset (viz. A, B, or C) is determined by the TOD table used. Here, I'm just picking offsetA
-//for the sake of debugging
-		sig_plan_msg->coordination_plan_params.offset = plan_params[long_status8->pattern]->offsetA;
-	}
+	if( (long_status8->pattern < 252) && (long_status8->pattern > 0) )
+		curr_plan_num = ((long_status8->pattern - 1) / 3) + 1;
+	else
+		curr_plan_num = 0;
 
 	sig_plan_msg->coordination_plan_params.coord_phase = ca_spat->active_phase;
 
-	battelle_spat->intersection_id = 0x01;
-	battelle_spat->intersection_id_size = 0x04;
+	battelle_spat->intersection_id.obj_id = 0x01;
+	battelle_spat->intersection_id.size = 0x04;
+	battelle_spat->intersection_id.intersection_id = 0x01;
 
 	battelle_spat->message_timestamp.obj_id = 0x03;
 	battelle_spat->message_timestamp.size = 0x05;
@@ -1601,20 +1599,13 @@ int build_spat(sig_plan_msg_t *sig_plan_msg, raw_signal_status_msg_t *ca_spat, p
 			ca_spat-> master_cycle_clock
 		);
 	}
-
-//    if(long_status8->pattern == FREE) 	
+printf("build_spat: pattern %d curr_plan_num %d offset %s ca_spat->plan_num %d\n", long_status8->pattern, curr_plan_num, offset_str[(long_status8->pattern - 1)%3], ca_spat->plan_num);
+    if(long_status8->pattern == FREE) 	
 	{
+/*
 	    for(i=0; i<MAX_PHASES; i++) {
 		j = 1 << i;
 
-		sig_plan_msg->phase_timing_params.min_green[i] = phase_timing[i]->min_green;
-		sig_plan_msg->phase_timing_params.max_green[i] = phase_timing[i]->max_green1;
-		sig_plan_msg->phase_timing_params.ped_walk[i] = phase_timing[i]->walk_1;
-		sig_plan_msg->phase_timing_params.ped_clr[i] = phase_timing[i]->dont_walk;
-		sig_plan_msg->phase_timing_params.yellow[i] = phase_timing[i]->yellow;
-		sig_plan_msg->phase_timing_params.red_clr[i] = phase_timing[i]->all_red;
-		if(long_status8->pattern < 254)
-			sig_plan_msg->coordination_plan_params.green_factor[i] = plan_params[long_status8->pattern]->green_factor[i];
 
 		interval = (i<4) ? ca_spat->interval_A : ca_spat->interval_B;
 		Max_Green[i] = (ca_spat->veh_call & j) ? (phase_timing[i]->max_green1 + phase_timing[i]->min_green) : 0;
@@ -1640,7 +1631,7 @@ int build_spat(sig_plan_msg_t *sig_plan_msg, raw_signal_status_msg_t *ca_spat, p
 				battelle_spat->movement[i].max_time_remaining.maxtimeremaining = battelle_spat->movement[i].min_time_remaining.mintimeremaining;
 				reduce_gap_start_time[i] = 0;
 			}
-printf("timer for movement %d %d interval %hhx\n", i+1, battelle_spat->movement[i].min_time_remaining.mintimeremaining, interval);
+printf("timer for movement %d %d interval %hhx plan %hhu\n", i+1, battelle_spat->movement[i].min_time_remaining.mintimeremaining, interval, curr_plan_num);
 		
 			Max_Green[i] = battelle_spat->movement[i].min_time_remaining.mintimeremaining; 
 			Min_Green[i] = battelle_spat->movement[i].min_time_remaining.mintimeremaining; 
@@ -1653,6 +1644,7 @@ printf("timer for movement %d %d interval %hhx\n", i+1, battelle_spat->movement[
 					ca_spat->ped_call
 				);
 		}
+*/
 /*
 		else {
 			battelle_spat->movement[i].max_time_remaining.maxtimeremaining = 
@@ -1675,6 +1667,7 @@ printf("timer for movement %d %d interval %hhx\n", i+1, battelle_spat->movement[
 			}
 	    	}
 */
+/*
 		if(verbose) {
 			printf("veh_call %#hhx max_green1(%d) %hhu yellow(%d) %hhu all-red(%d) %hhu min_green(%d) %hhu add_per_veh(%d) %hhu Max_Green(%d) %hu Min_Green(%d) %hhu\n",
 				ca_spat->veh_call, 
@@ -1698,11 +1691,277 @@ printf("timer for movement %d %d interval %hhx\n", i+1, battelle_spat->movement[
 		}
 	}
 
-
+*/
     }
-//    else{
-//	printf("Coordination plan is not FREE, it is %d\n", long_status8->pattern);
-//    }
+    else{
+//printf("Phase sequence ");
+	//Determine phase sequence in pairs. 
+	for(i=0; i<MAX_PHASES; i+=2) {
+		Max_Green[i] = (ca_spat->veh_call & j) ? min(phase_timing[i]->max_green1+phase_timing[i]->min_green, plan_params[curr_plan_num]->green_factor[i] - phase_timing[i]->min_green) : 0;
+		Max_Green[i+1] = (ca_spat->veh_call & j<<1) ? min(phase_timing[i+1]->max_green1+phase_timing[i+1]->min_green, plan_params[curr_plan_num]->green_factor[i+1] - phase_timing[i+1]->min_green) : 0;
 
+//0 1 2 3 4 5 6 7
+//2 1 4 3 5 6 8 7 
+//active_phaseA 2
+//start_index_phaseA 0
+		//if i is a lag phase, then i+1 must be a leading phase, and vice versa
+		j = 1 << i;
+		if( (j & plan_params[curr_plan_num]->lag_phases) ) {
+			phase_sequence[i] = i+2;
+			phase_sequence[i+1] = i+1;
+			if(ca_spat->active_phase & j) { //Active phase calculations
+				if(i<4) {
+					start_index_phaseA = i+1;
+					active_phaseA = i+1;
+				}
+				else {
+					start_index_phaseB = i+1;
+					active_phaseB = i+1;
+				}
+			}
+			else {
+				j <<= 1;
+				if(ca_spat->active_phase & j) { //Active phase calculations
+					if(i<4){
+						start_index_phaseA = i;
+						active_phaseA = i+2;
+					}
+					else{
+						start_index_phaseB = i;
+						active_phaseB = i+2;
+					}
+				}
+			}
+		}
+		else {
+			phase_sequence[i] = i+1;
+			phase_sequence[i+1] = i+2;
+			if(ca_spat->active_phase & j) { //Active phase calculations
+				if(i<4) {
+					start_index_phaseA = i;
+					active_phaseA = i+1;
+				}
+				else {
+					start_index_phaseB = i;
+					active_phaseB = i+1;
+				}
+			}
+			else {
+				j <<= 1;
+				if(ca_spat->active_phase & j) { //Active phase calculations
+					if(i<4){
+						start_index_phaseA = i+1;
+						active_phaseA = i+2;
+					}
+					else{
+						start_index_phaseB = i+1;
+						active_phaseB = i+2;
+					}
+				}
+			}
+		}
+//printf("#%hhu %hhu #%hhu %hhu ", i, phase_sequence[i], i+1, phase_sequence[i+1]);
+	}
+//printf("start_index_phaseA %hhu active_phaseA %hhu start_index_phaseB %hhu active_phaseB %hhu ", start_index_phaseA, active_phaseA, start_index_phaseB, active_phaseB);
+//printf("\n");
+
+//printf("Time to next phase ");
+	//Determine time_to_next_phase for all phases
+	for(i=0; i<MAX_PHASES; i++) {
+		j = 1 << i;
+		if(ca_spat->active_phase & j) { //Active phase calculations
+			if(i<4) {
+				interval = ca_spat->interval_A;
+				countdown_timer = ca_spat->intvA_timer;
+				force_off = ca_spat->force_off_A;
+			}
+			else {
+				interval = ca_spat->interval_B;
+				countdown_timer = ca_spat->intvB_timer;
+				force_off = ca_spat->force_off_B;
+			}
+			switch(colors[interval]) {
+				case GREEN:
+
+
+					time_to_next_phase[i] = 10*(force_off - ca_spat->local_cycle_clock) + 
+						phase_timing[i]->yellow + 
+						phase_timing[i]->all_red;
+						reduce_gap_start_time[i] = 0;
+					if(plan_params[i]->sync_phases & j) {
+						time_to_next_phase[i] = 10*(plan_params[curr_plan_num]->cycle_length - ca_spat->local_cycle_clock) + 
+							phase_timing[i]->yellow + 
+							phase_timing[i]->all_red;
+							reduce_gap_start_time[i] = 0;
+					}
+/*					if(interval == 0x07) {
+						if(reduce_gap_start_time[i] == 0)
+							reduce_gap_start_time[i] = tstemp;
+						time_to_next_phase[i] = 
+							(10 * Max_Green[i]) - 
+							((tstemp - reduce_gap_start_time[i])/100) +
+							phase_timing[i]->yellow + 
+							phase_timing[i]->all_red;
+//printf("REDUCE GAP %d yellow %hhu all-red %hhu Max_Green[%d] %d tstemp %d reduce_gap_start_time %d\n", ((10 * Max_Green[i]) - ((tstemp - reduce_gap_start_time[i])/100))/10, phase_timing[i]->yellow, phase_timing[i]->all_red, i+1, Max_Green[i],tstemp, reduce_gap_start_time);
+					}
+					else 
+						if(plan_params[i]->sync_phases & j) {
+							time_to_next_phase[i] = 10*(plan_params[curr_plan_num]->cycle_length - ca_spat->local_cycle_clock) + 
+								phase_timing[i]->yellow + 
+								phase_timing[i]->all_red;
+								reduce_gap_start_time[i] = 0;
+						}
+					
+					else {
+						time_to_next_phase[i] = 10*countdown_timer + 
+							phase_timing[i]->yellow + 
+							phase_timing[i]->all_red;
+							reduce_gap_start_time[i] = 0;
+					}
+*/
+					break;
+				case YELLOW:
+					time_to_next_phase[i] = countdown_timer + phase_timing[i]->all_red;
+					reduce_gap_start_time[i] = 0;
+					break;
+				case RED:
+					time_to_next_phase[i] = countdown_timer;
+					reduce_gap_start_time[i] = 0;
+					break;
+			}
+//printf("#%hhu %hhu %hhu %hhu %hhu", i+1, time_to_next_phase[i]/10, countdown_timer, ca_spat->force_off_A, ca_spat->force_off_B);
+		}
+		else {
+			time_to_next_phase[i] = (10 * Max_Green[i]) + phase_timing[i]->yellow + phase_timing[i]->all_red;
+		}
+//printf("#%hhu %hhu ", i+1, time_to_next_phase[i]/10);
+}
+//printf("\n");
+				
+/*
+max_green1	50 50 50 50 50 50 50 50
+GreenFactor	20 20 20 20 20 20 20 20
+Yellow		 3  3  3  3  3  3  3  3
+All-red		 2  2  2  2  2  2  2  2
+Cycle time	110
+lag phases	1,3,5,7
+sync phases	2,6
+Red-green change 1,5=6; 4,8=31; 3,7=56; 2,6=81
+*/			
+		
+//	The phase sequence is now contained in phase_sequence[]. There are two active phases, one in ring A (phases 1-4) and one
+//	in ring B (phases 5-8).  The indices of the active phases within this array are start_index_phaseA and start_index_phaseB,
+//	respectively. So calculating the max and min remaining times of nonactive phases is a matter of cycling through the phase_sequence
+//	array, starting with the currently active phases, to find progressively later remaining times for phases later in the sequence.
+
+	battelle_spat->movement[active_phaseA].min_time_remaining.mintimeremaining = 
+		interval_multiplier[ca_spat->interval_A] * ca_spat->intvA_timer;
+	battelle_spat->movement[active_phaseA].max_time_remaining.maxtimeremaining =
+		min(plan_params[curr_plan_num]->green_factor[active_phaseA], 
+			phase_timing[phase_sequence[active_phaseA]]->max_green1);
+
+
+//0 1 2 3 4 5 6 7
+//2 1 4 3 5 6 8 7 
+//printf("#%hhu %hhu ", start_index_phaseA, active_phaseA);
+	for(i=0; i<MAX_PHASES/2 - 1; i++) {
+		total_time_to_next_phase[phase_sequence[(start_index_phaseA+i+1)%4]] = 
+			total_time_to_next_phase[phase_sequence[(start_index_phaseA+i)%4]] + time_to_next_phase[phase_sequence[(start_index_phaseA+i)%4]];
+//printf("#%hhu %hhu %hhu %d sec ", start_index_phaseA, active_phaseA, phase_sequence[start_index_phaseA+i+1]%4, total_time_to_next_phase[phase_sequence[start_index_phaseA]+i]);
+//printf("#%hhu %hhu sec ", (start_index_phaseA+i+1)%4, total_time_to_next_phase[phase_sequence[(start_index_phaseA+i+1)%4]]/10);
+
+			battelle_spat->movement[i].max_time_remaining.maxtimeremaining = 
+				( (10*max(Max_Green[(i+1)%4], Max_Green[(i+1)%8])) + 
+				max(phase_timing[(i+1)%4]->yellow, phase_timing[(i+1)%8]->yellow) + 
+				max(phase_timing[(i+1)%4]->all_red, phase_timing[(i+1)%8]->all_red) +
+
+				(10*max(Max_Green[(i+2)%4], Max_Green[(i+2)%8])) + 
+				max(phase_timing[(i+2)%4]->yellow, phase_timing[(i+2)%8]->yellow) + 
+				max(phase_timing[(i+2)%4]->all_red, phase_timing[(i+2)%8]->all_red) +
+	
+				(10*max(Max_Green[(i+3)%4], Max_Green[(i+3)%8])) + 
+				max(phase_timing[(i+3)%4]->yellow, phase_timing[(i+3)%8]->yellow) + 
+				max(phase_timing[(i+3)%4]->all_red, phase_timing[(i+3)%8]->all_red) )/10;
+	}
+
+//printf("local clock %hhu\n", ca_spat->local_cycle_clock);
+    }
+//printf("\n");
+
+	return 0;
+}
+
+
+int build_sigplanmsg(sig_plan_msg_t *sig_plan_msg, phase_timing_t *phase_timing[], plan_params_t *current_plan_params,get_long_status8_resp_mess_typ *long_status8, int verbose) {
+
+	timestamp_t ts;
+	int tstemp;
+	int i;
+	char *buf = (char *)sig_plan_msg;
+	unsigned char curr_plan_num;
+	unsigned char curr_offset;
+
+	memset(sig_plan_msg, 0, sizeof(sig_plan_msg_t));
+	sig_plan_msg->mmitss_msg_hdr.msgid = MSG_ID_SIG_PLAN;
+
+	get_current_timestamp(&ts);
+	tstemp = (1000 * ((3600 * ts.hour) + (60 * ts.min) + ts.sec)) + ts.millisec;
+	sig_plan_msg->mmitss_msg_hdr.cur_epoch_time = tstemp/10;
+
+	sig_plan_msg->phase_timing_params.obj_id = 0x01;
+	sig_plan_msg->phase_timing_params.size = 0x31;
+//MUST FIX!! Permitted phases is contained in the GetPhaseFlags request and in memory address 0x1F0
+	sig_plan_msg->phase_timing_params.permitted_phases = 0xFF;
+
+	sig_plan_msg->coordination_plan_params.obj_id = 0x02;
+	sig_plan_msg->coordination_plan_params.size = 0x0C;
+
+
+	for(i=0; i<MAX_PHASES; i++) {
+		sig_plan_msg->phase_timing_params.min_green[i] = phase_timing[i]->min_green;
+		sig_plan_msg->phase_timing_params.max_green[i] = phase_timing[i]->max_green1;
+		sig_plan_msg->phase_timing_params.ped_walk[i] = phase_timing[i]->walk_1;
+		sig_plan_msg->phase_timing_params.ped_clr[i] = phase_timing[i]->dont_walk;
+		sig_plan_msg->phase_timing_params.yellow[i] = phase_timing[i]->yellow;
+		sig_plan_msg->phase_timing_params.red_clr[i] = phase_timing[i]->all_red;
+		if(long_status8->pattern < 252)
+			sig_plan_msg->coordination_plan_params.green_factor[i] = current_plan_params->green_factor[i];
+	}
+
+printf("build_sigplanmsg: Got to 1 long_status8->pattern %d\n", long_status8->pattern);
+
+	if( (long_status8->pattern < 252) && (long_status8->pattern > 0)) {
+		sig_plan_msg->coordination_plan_params.cycle_length = current_plan_params->cycle_length;
+		sig_plan_msg->coordination_plan_params.coord_phase = current_plan_params->sync_phases;
+
+		curr_plan_num = ((long_status8->pattern - 1) / 3) + 1;
+		curr_offset = ((long_status8->pattern - 1) % 3);
+
+printf("build_sigplanmsg: Got to 2 curr_plan_num %d curr_offset %d\n", curr_plan_num, curr_offset);
+		switch(curr_offset) {
+			case 0:
+				sig_plan_msg->coordination_plan_params.offset = current_plan_params->offsetA;
+				break;
+			case 1:
+				sig_plan_msg->coordination_plan_params.offset = current_plan_params->offsetB;
+				break;
+			case 2:
+				sig_plan_msg->coordination_plan_params.offset = current_plan_params->offsetC;
+				break;
+		}
+	}
+	else
+		curr_plan_num = 0;
+	sig_plan_msg->coordination_plan_params.plan_num = curr_plan_num;
+
+	if(verbose) {
+		printf("build_sigplanmsg:");
+		for(i=0; i<sizeof(sig_plan_msg_t); i++){ 
+			if(!(i%10))
+				printf("\n%d: ", i);
+			printf("0x%.2hhx ", buf[i]);
+		}
+		printf("\n");
+	}
 	return 0;
 }
