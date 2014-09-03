@@ -4,9 +4,8 @@
 #include "msgs.h"
 #include "timestamp.h"
 #include "ab3418commudp.h"
-
-#define	FALSE	0
-#define	TRUE	1
+#include "local.h"
+#include "mmitss_ports_and_message_numbers.h"
 
 #define MAX_PHASES	8
 #define MAX_PLANS	10
@@ -54,5 +53,7 @@ extern int get_spat(int wait_for_data, raw_signal_status_msg_t *praw_signal_stat
 extern int build_spat(sig_plan_msg_t *sig_plan_msg, raw_signal_status_msg_t *ca_spat, phase_timing_t *phase_timing[8], get_long_status8_resp_mess_typ *long_status8, plan_params_t *plan_params[10], battelle_spat_t *battelle_spat, int verbose);
 int get_coord_params(plan_params_t *plan_params, int plan_num, int wait_for_data, int *fpout, int *fpin, char verbose);
 extern int set_coord_params(plan_params_t *plan_params, int plan_num, mschedule_t *mschedule, int wait_for_data, int fdout, int fdin, char verbose);
+extern int build_sigplanmsg(sig_plan_msg_t *sig_plan_msg, phase_timing_t *phase_timing[], plan_params_t *current_plan_params,get_long_status8_resp_mess_typ *long_status8, int verbose);
+
 
 #endif
