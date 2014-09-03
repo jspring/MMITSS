@@ -861,6 +861,7 @@ int get_status(int wait_for_data, gen_mess_typ *readBuff, int fpin, int fpout, c
 	get_long_status8_resp_mess_typ get_long_status8_request;
         struct timespec start_time;
         struct timespec end_time;
+	int i;
 	
 	if(verbose != 0)
 		printf("get_status 1: Starting get_status request\n");
@@ -921,6 +922,10 @@ int get_status(int wait_for_data, gen_mess_typ *readBuff, int fpin, int fpout, c
 			(end_time.tv_sec + (end_time.tv_nsec/1.0e9)) -
 			(start_time.tv_sec + (start_time.tv_nsec/1.0e9))
 		);
+		printf("get_status data: ");
+		for(i = 0; i < sizeof(get_long_status8_resp_mess_typ); i++)
+			printf("#%02d %#hhx ", i, readBuff->data[i]);
+		printf("\n");
 		printf("get_status 6-end: fpin %d selectval %d inportisset %s fpout %d selectval %d outportisset %s ser_driver_retval %d\n", fpin, selectval, inportisset, fpout, selectval, outportisset, ser_driver_retval);
 	}
 	return 0;
@@ -1531,6 +1536,8 @@ readBuff->data[5] = 0xff;
 #define YELLOW	1
 #define GREEN	2
 
+#include <SPAT.h>
+
 int build_spat(sig_plan_msg_t *sig_plan_msg, raw_signal_status_msg_t *ca_spat, phase_timing_t *phase_timing[], get_long_status8_resp_mess_typ *long_status8, plan_params_t *plan_params[], battelle_spat_t *battelle_spat, int verbose) {
 
 	unsigned char Max_Green[8];
@@ -1558,6 +1565,9 @@ int build_spat(sig_plan_msg_t *sig_plan_msg, raw_signal_status_msg_t *ca_spat, p
 	static int reduce_gap_start_time[MAX_PHASES] = {0,0,0,0,0,0,0,0};
 	unsigned char phase_sequence[MAX_PHASES];
 	unsigned char *offset_str[] = {"A", "B", "C"};
+	static unsigned char msg_count = 0;
+	unsigned char	*pbattelle_spat = battelle_spat;
+	SPAT_t SPAT;
 
 	memset(sig_plan_msg, 0, sizeof(sig_plan_msg_t));
 	memset(time_to_next_phase, 0, sizeof(time_to_next_phase));
@@ -1573,14 +1583,31 @@ int build_spat(sig_plan_msg_t *sig_plan_msg, raw_signal_status_msg_t *ca_spat, p
 
 	sig_plan_msg->coordination_plan_params.coord_phase = ca_spat->active_phase;
 
-	battelle_spat->intersection_id.obj_id = 0x01;
-	battelle_spat->intersection_id.size = 0x04;
-	battelle_spat->intersection_id.intersection_id = 0x01;
+	SPAT.msgID = 0x0d;					/* Byte 0 */
+//	SPAT.intersections= 0x0d;					/* Byte 0 */
 
-	battelle_spat->message_timestamp.obj_id = 0x03;
-	battelle_spat->message_timestamp.size = 0x05;
-	battelle_spat->message_timestamp.timestamp_sec = (3600 * ts.hour) + (60 * ts.min) + ts.sec;
-	battelle_spat->message_timestamp.timestamp_tenths = ts.millisec/100;
+	battelle_spat->DSRCmsgID = 0x0d;					/* Byte 0 */
+	battelle_spat->content_version = msg_count++;				/* Byte 1 */
+	battelle_spat->size = sizeof(battelle_spat_t) - 6;			/* Byte 2-3 */
+	battelle_spat->intersection_id.obj_id = 0x01;				/* Byte 4 */
+	battelle_spat->intersection_id.size = 0x04;				/* Byte 5 */
+	battelle_spat->intersection_id.intersection_id = 0x01;			/* Byte 6-9 */
+
+	battelle_spat->intersection_status.obj_id = 0x02;			/* Byte 10 */
+	battelle_spat->intersection_status.size = 0x01;				/* Byte 11 */
+	if( (long_status8->pattern == 254) || (long_status8->status == 2) )
+		battelle_spat->intersection_status.intersection_status = INTERSECTION_STATUS_CONFLICT_FLASH;	/* Byte 12 */
+	else if(long_status8->preemption != 0)
+		battelle_spat->intersection_status.intersection_status = INTERSECTION_STATUS_PREEMPT;	/* Byte 12 */
+	else if( ((long_status8->interval & 0x0f) == 0x0a) || ((long_status8->interval & 0xf0) == 0xa0) )
+		battelle_spat->intersection_status.intersection_status = INTERSECTION_STATUS_STOP_TIME;	/* Byte 12 */
+	else 
+		battelle_spat->intersection_status.intersection_status = INTERSECTION_STATUS_MANUAL;	/* Byte 12 */
+
+	battelle_spat->message_timestamp.obj_id = 0x03;				/* Byte 13 */
+	battelle_spat->message_timestamp.size = 0x05;				/* Byte 14 */
+	battelle_spat->message_timestamp.timestamp_sec = (3600 * ts.hour) + (60 * ts.min) + ts.sec;	/* Byte 15-18 */
+	battelle_spat->message_timestamp.timestamp_tenths = ts.millisec/100;	/* Byte 19 */
 
 
 /* Calculation of "Time to change":
@@ -1879,7 +1906,7 @@ Red-green change 1,5=6; 4,8=31; 3,7=56; 2,6=81
 				max(phase_timing[(i+2)%4]->yellow, phase_timing[(i+2)%8]->yellow) + 
 				max(phase_timing[(i+2)%4]->all_red, phase_timing[(i+2)%8]->all_red) +
 	
-				(10*max(Max_Green[(i+3)%4], Max_Green[(i+3)%8])) + 
+//				(10*max(Max_Green[(i+3)%4], Max_Green[(i+3)%8])) + 
 				max(phase_timing[(i+3)%4]->yellow, phase_timing[(i+3)%8]->yellow) + 
 				max(phase_timing[(i+3)%4]->all_red, phase_timing[(i+3)%8]->all_red) )/10;
 	}
@@ -1888,6 +1915,18 @@ Red-green change 1,5=6; 4,8=31; 3,7=56; 2,6=81
     }
 //printf("\n");
 
+if(verbose) {
+	printf("build_spat:\n");
+	for(j=0; j<sizeof(battelle_spat_t); j+=10){
+		printf("%d: ", j);
+		for(i=0; i<10; i++)
+			printf("%hhx ", pbattelle_spat[j+i]);
+		printf("\n");
+	}
+}
+printf("sizeof(battelle_spat_t) %d sizeof(movement_t) %d\n", sizeof(battelle_spat_t), sizeof(movement_t));
+printf("sizeof(intersection_id_t) %d sizeof(intersection_status_t) %d\n", sizeof(intersection_id_t), sizeof(intersection_status_t));
+printf("sizeof(message_timestamp_t) %d\n", sizeof(message_timestamp_t));
 	return 0;
 }
 
