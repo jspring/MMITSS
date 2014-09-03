@@ -9,8 +9,7 @@
 #include <udp_utils.h>
 #include "Battelle_SPaT_MIB.h"
 #include "local.h"
-
-#define TRAFFICCTLPORT	5300
+#include "mmitss_ports_and_message_numbers.h"
 
 static jmp_buf exit_env;
 
@@ -31,7 +30,7 @@ static int sig_list[] =
 	ERROR
 };
 
-int OpenTSCPConnection(char *controllerIP, char *port);
+int OpenTCPIPConnection(char *controllerIP, unsigned short port);
 int process_phase_status( get_long_status8_resp_mess_typ *pstatus, int verbose, unsigned char greens, phase_status_t *pphase_status);
 extern int spat2battelle(raw_signal_status_msg_t *ca_spat, battelle_spat_t *battelle_spat, phase_timing_t *phase_timing[8], int verbose);
 
@@ -39,11 +38,12 @@ int main(int argc, char *argv[]) {
 
         struct sockaddr_in snd_addr;    /// used in sendto call
 	int i;
+	int j;
 	int ab3418_fdin = -1;
 	int ab3418_fdout = -1;
 	int ca_spat_fdin = -1;
 	int ca_spat_fdout = -1;
-	char trafficctlreadbuf[60];
+	char datamgr_readbuff[60];
 	int len;
 	int wait_for_data = 1;
 	gen_mess_typ readBuff;
@@ -64,7 +64,7 @@ int main(int argc, char *argv[]) {
 	char ab3418_port[20] = "/dev/ttyS0";
 	char ca_spat_port[20] = "/dev/ttyS1";
 	char strbuf[300];
-	struct sockaddr_storage trafficctl_addr;
+	struct sockaddr_storage datamgr_addr;
 
 
 	struct timespec start_time;
@@ -88,13 +88,10 @@ int main(int argc, char *argv[]) {
 //	unsigned char new_phase_assignment;	
 	unsigned char output_spat_binary = 0;
 
-	int sd_out = -5;             /// socket descriptor for UDP send
-        short udp_out_port = -1;    /// set from command line option
-        char *udp_out_name = "127.0.0.1";  /// address of UDP destination
+	int datamgr_out = -5;             /// socket descriptor for UDP/TCP send
         int bytes_sent;         /// returned from sendto
  
-        int sd_in = -5;             /// socket descriptor for UDP receive 
-        short udp_in_port = 0;    /// set from command line option
+        int datamgr_in = -5;             /// socket descriptor for UDP receive 
 
 	struct timeval timeout;
 	fd_set readfds, readfds_sav;
@@ -102,10 +99,11 @@ int main(int argc, char *argv[]) {
 	int maxfd = 0;
 	int numready;
 	int use_tcp = 0;
+	unsigned char curr_plan_num = 255;
+	unsigned char curr_plan_num_sav = 255;
 
  
 	pbattelle_spat = (char *)&battelle_spat;
-
         while ((opt = getopt(argc, argv, "A:S:vi:tna:bo:s:l:h:z")) != -1)
         {
                 switch (opt)
@@ -121,9 +119,6 @@ int main(int argc, char *argv[]) {
                   case 'v':
                         verbose = 1;
                         break;
-                  case 'i':
-                        udp_in_port = (short)atoi(optarg);
-                        break;
                   case 't':
                         use_tcp = 1;
                         break;
@@ -135,12 +130,6 @@ int main(int argc, char *argv[]) {
                         break;
                   case 'b':
                         output_spat_binary = 1;
-                        break;
-                  case 'o':
-                        udp_out_port = (short)atoi(optarg);
-                        break;
-                  case 's':
-                        udp_out_name = strdup(optarg);
                         break;
                   case 'l':
                         low_battelle = atoi(optarg);
@@ -156,63 +145,27 @@ int main(int argc, char *argv[]) {
 	}
 
 	if(low_battelle >= 0) {
-		if( (low_battelle > 244) || (high_battelle > 244) ) {
-			fprintf(stderr, "Battelle bytes must be in the range 0-244. Exiting....\n");
+		if( (low_battelle > sizeof(battelle_spat_t)) || (high_battelle > sizeof(battelle_spat_t)) ) {
+			fprintf(stderr, "Battelle bytes must be in the range 0-%d. Exiting....\n", sizeof(battelle_spat_t));
 			exit(EXIT_FAILURE);
 		}
 		if(high_battelle < low_battelle)
-			high_battelle = ((low_battelle + 16) > 244) ? 244 : low_battelle + 16;
+			high_battelle = ((low_battelle + 16) > sizeof(battelle_spat_t)) ? sizeof(battelle_spat_t): low_battelle + 16;
 	}
 
 	// Clear message structs
 	memset(&db_timing_set_2070, 0, sizeof(db_timing_set_2070));
 	memset(&raw_signal_status_msg, 0, sizeof(raw_signal_status_msg));
 	memset(&snd_addr, 0, sizeof(snd_addr));
+	memset(&battelle_spat, 0, sizeof(battelle_spat_t));
 	for(i=0; i<MAX_PHASES; i++) 
 		pphase_timing[i] = &phase_timing[i];
 	for(i=0; i<MAX_PLANS+1; i++) 
 		pplan_params[i] = &plan_params[i];
 
-	if( udp_out_port >= 0  ) {
-		fprintf(stderr, "Opening UDP unicast to destination %s port %hu\n",
-			udp_out_name, udp_out_port);
-                sd_out = udp_unicast_init(&snd_addr, udp_out_name, udp_out_port);
-
-		if (sd_out < 0) {
-			printf("Failure opening unicast socket on %s %d\n",
-				udp_out_name, udp_out_port);
-			exit(EXIT_FAILURE);
-		}
-		else {
-			printf("Success opening socket %hhu on %s %d\n",
-				sd_out, udp_out_name, udp_out_port);
-			printf("port %d addr 0x%08x\n", ntohs(snd_addr.sin_port),
-			ntohl(snd_addr.sin_addr.s_addr));
-			temp_addr = snd_addr.sin_addr.s_addr;
-			temp_port = snd_addr.sin_port;
-		}
-	}
-	if( udp_in_port >= 0  ) {
-		fprintf(stderr, "Opening UDP listener on port %hu\n",
-			udp_in_port);
-
-        	sd_in = udp_allow_all(udp_in_port);
-
-		if (sd_in < 0) {
-			printf("Failure opening listener socket on port %d\n",
-				udp_in_port);
-			exit(EXIT_FAILURE);
-		}
-		else {
-			printf("Success opening socket %hhu on port %d\n",
-				sd_in, udp_in_port);
-			printf("port %d addr 0x%08x\n", ntohs(snd_addr.sin_port),
-			ntohl(snd_addr.sin_addr.s_addr));
-			temp_addr = snd_addr.sin_addr.s_addr;
-			temp_port = snd_addr.sin_port;
-		}
-	}
-
+	datamgr_out = OpenTCPIPConnection("localhost", (unsigned short)DATA_MANAGER_PORT);
+	if(datamgr_out >= 0)
+		datamgr_in = datamgr_out;
         /* Initialize serial port. */
 	check_retval = check_and_reconnect_serial(0, &ab3418_fdin, &ab3418_fdout, ab3418_port);
 	check_retval = check_and_reconnect_serial(0, &ca_spat_fdin, &ca_spat_fdout, ca_spat_port);
@@ -238,9 +191,11 @@ int main(int argc, char *argv[]) {
 		db_timing_get_2070.phase = i+1;	
 		db_timing_get_2070.page = 0x100; //phase timing page	
 		retval = get_timing(&db_timing_get_2070, wait_for_data, &phase_timing[i], &ab3418_fdin, &ab3418_fdout, verbose);
-// Instead of db_clt_write here, the phase timing maybe should be sent to another process via udp?
-//		db_clt_write(pclt, DB_PHASE_1_TIMING_VAR + i, sizeof(phase_timing_t), &phase_timing[i]);
-		usleep(500000);
+		if(retval < 0) {
+			usleep(500000);
+			retval = get_timing(&db_timing_get_2070, wait_for_data, &phase_timing[i], 
+				&ab3418_fdin, &ab3418_fdout, verbose);
+		}
 	}
 
 	printf("main 2: getting coordination plan settings before infinite loop\n");
@@ -258,13 +213,13 @@ int main(int argc, char *argv[]) {
 	//Zero out saved fds
 	FD_ZERO(&readfds_sav);
 	FD_ZERO(&writefds_sav);
-	if(sd_in >= 0) {
-		FD_SET(sd_in, &readfds_sav);
-		maxfd = sd_in;
+	if(datamgr_in >= 0) {
+		FD_SET(datamgr_in, &readfds_sav);
+		maxfd = datamgr_in;
 	}
-	if(sd_out >= 0){
-		FD_SET(sd_out, &writefds_sav);
-		maxfd = (sd_out > maxfd) ? sd_out : maxfd;
+	if(datamgr_out >= 0){
+		FD_SET(datamgr_out, &writefds_sav);
+		maxfd = (datamgr_out > maxfd) ? datamgr_out : maxfd;
 	}
 
 	if(ab3418_fdin >= 0){
@@ -305,26 +260,108 @@ while(1) {
 		retval = get_status(wait_for_data, &readBuff, ab3418_fdin, ab3418_fdout, verbose);
 		retval = get_spat(wait_for_data, &raw_signal_status_msg, ca_spat_fdin, verbose, output_spat_binary);
 		memcpy(&long_status8, &readBuff, sizeof(get_long_status8_resp_mess_typ));
+
 		retval = build_spat(&sig_plan_msg, &raw_signal_status_msg, pphase_timing, &long_status8, pplan_params, &battelle_spat, verbose);
 		snd_addr.sin_port = temp_port;
 		snd_addr.sin_addr.s_addr = temp_addr;
+if(verbose) {                                           
+        printf("ab3418commudp build_spat:\n");
+        for(j=0; j<sizeof(battelle_spat_t); j+=10){             
+                printf("%d: ", j);                                  
+                for(i=0; i<10; i++)                                 
+                        printf("%hhx ", pbattelle_spat[j+i]);           
+                printf("\n");
+        }                                                       
+}                                                       
+
 		if(low_battelle >= 0) {
 			printf("ab3418udp:Battelle Spat: ");
 			for(i=low_battelle; i <= high_battelle; i++)
 				printf("#%d %#hhx ", i, pbattelle_spat[i]);
 			printf("\n");
 		}
+		if(long_status8.pattern < 252) 
+			curr_plan_num = (long_status8.pattern / 3) + 1;
+		else
+			curr_plan_num = 0;
+		if(curr_plan_num != curr_plan_num_sav) {
+			printf("Changing plan number from %d to %d long_status8.pattern %d\n", curr_plan_num_sav, curr_plan_num, long_status8.pattern);
+			curr_plan_num_sav = curr_plan_num;
+//			if(long_status8.pattern < 252) 
+			retval = get_coord_params(&plan_params[curr_plan_num], 
+				curr_plan_num, 
+//				wait_for_data, &ab3418_fdout, &ab3418_fdin, verbose);
+				wait_for_data, &ab3418_fdout, &ab3418_fdin, 1);
+//			if(retval < 0) {
+				printf("get_coord_params returned %d for plan %d %d\n",
+					retval, curr_plan_num, raw_signal_status_msg.plan_num);
+//			}  
+			for(i=0; i<MAX_PHASES; i++) {
+				db_timing_get_2070.phase = i+1;	
+				db_timing_get_2070.page = 0x100; //phase timing page	
+				retval = get_timing(&db_timing_get_2070, wait_for_data, &phase_timing[i], 
+					&ab3418_fdin, &ab3418_fdout, verbose);
+				if(retval < 0) {
+					usleep(500000);
+					retval = get_timing(&db_timing_get_2070, wait_for_data, &phase_timing[i], 
+						&ab3418_fdin, &ab3418_fdout, verbose);
+				}
+			}
+			retval = build_sigplanmsg(&sig_plan_msg, pphase_timing, 
+//				&plan_params[curr_plan_num], &long_status8, verbose);
+				&plan_params[curr_plan_num], &long_status8, 1);
+			if(datamgr_out >= 0)
+//			    bytes_sent = sendto(datamgr_out, &sig_plan_msg, sizeof(sig_plan_msg_t), 0,
+//				(struct sockaddr *) &snd_addr, sizeof(snd_addr));
+			    bytes_sent = write(datamgr_out, &sig_plan_msg, sizeof(sig_plan_msg_t));
+			else {
+				datamgr_out = OpenTCPIPConnection("localhost", (unsigned short)TRAF_CTL_IFACE_PORT);
+				datamgr_in = datamgr_out;
+
+				//Zero out saved fds
+				FD_ZERO(&readfds_sav);
+				FD_ZERO(&writefds_sav);
+				if(datamgr_in >= 0) {
+					FD_SET(datamgr_in, &readfds_sav);
+					maxfd = datamgr_in;
+				}
+				if(datamgr_out >= 0){
+					FD_SET(datamgr_out, &writefds_sav);
+					maxfd = (datamgr_out > maxfd) ? datamgr_out : maxfd;
+				}
+
+				if(ab3418_fdin >= 0){
+					FD_SET(ab3418_fdin, &readfds_sav);
+					maxfd = (ab3418_fdin > maxfd) ? ab3418_fdin : maxfd;
+				}
+				if(ab3418_fdout >= 0){
+					FD_SET(ab3418_fdout, &writefds_sav);
+					maxfd = (ab3418_fdout > maxfd) ? ab3418_fdout : maxfd;
+				}
+				if(ca_spat_fdin >= 0){
+					FD_SET(ca_spat_fdin, &readfds_sav);
+					maxfd = (ca_spat_fdin > maxfd) ? ca_spat_fdin : maxfd;
+				}
+				if(ca_spat_fdout >= 0){
+					FD_SET(ca_spat_fdout, &writefds_sav);
+					maxfd = (ca_spat_fdout > maxfd) ? ca_spat_fdout : maxfd;
+				}
+			}
+
+		}
+	    bytes_sent = write(datamgr_out, &battelle_spat, sizeof(battelle_spat_t));
+//exit(EXIT_SUCCESS);
 	}
-	if(FD_ISSET(sd_in, &readfds)) {
-		memset(trafficctlreadbuf, 0, sizeof(trafficctlreadbuf));
-		if( (retval = recvfrom(sd_in, trafficctlreadbuf, sizeof(trafficctlreadbuf), 0,
-			(struct sockaddr *)&trafficctl_addr, (socklen_t *)&len)) > 0) {
-			if(trafficctlreadbuf[2] == SIGNAL_SCHED_MSG) {
-				printf("trafficctlreadbuf: \n");
-				for(i=0; i<sizeof(trafficctlreadbuf); i++) 
-					printf("#%d %hhx ", i, trafficctlreadbuf[i]);
+	if( (datamgr_in >=0) && (FD_ISSET(datamgr_in, &readfds)) ) {
+		memset(datamgr_readbuff, 0, sizeof(datamgr_readbuff));
+		if( (retval = recvfrom(datamgr_in, datamgr_readbuff, sizeof(datamgr_readbuff), 0,
+			(struct sockaddr *)&datamgr_addr, (socklen_t *)&len)) > 0) {
+			if(datamgr_readbuff[2] == SIGNAL_SCHED_MSG) {
+				printf("datamgr_readbuff: \n");
+				for(i=0; i<sizeof(datamgr_readbuff); i++) 
+					printf("#%d %hhx ", i, datamgr_readbuff[i]);
 				printf("\n");
-				memcpy(&mschedule, trafficctlreadbuf, sizeof(mschedule_t));
+				memcpy(&mschedule, datamgr_readbuff, sizeof(mschedule_t));
 				printf("Timing schedule request:\nPhase sequence: ");
 				for(i=0; i<8; i++)
 					printf("%03hhu ", mschedule.phase_sequence.phase_sequence[i]);
@@ -333,25 +370,18 @@ while(1) {
 					printf("%03hhu ", mschedule.phase_duration.phase_duration[i]);
 				printf("\n");
 
-				retval = get_coord_params(&plan_params[9], 9, 
-					wait_for_data, &ab3418_fdout, &ab3418_fdin, verbose);
-				if(retval < 0) {
-					printf("get_coord_params returned %d for plan 9\n",
-						retval);
-				} 
-				else {
 no_control = 0;
-					if(no_control == 0)
-						memcpy(&plan_params[10], &plan_params[9], sizeof(plan_params_t));
-						printf("Hall cycle length %d\n", plan_params[10].cycle_length);
-						retval = set_coord_params(&plan_params[9], 9, &mschedule, 1, ab3418_fdout, ab3418_fdin, verbose);
-				}
+				if(no_control == 0)
+					memcpy(&plan_params[10], &plan_params[9], sizeof(plan_params_t));
+					printf("Hall cycle length %d\n", plan_params[10].cycle_length);
+					retval = set_coord_params(&plan_params[9], 9, &mschedule, 1, 
+						ab3418_fdout, ab3418_fdin, verbose);
 			}
 		}
 	}
 
 	if(output_spat_binary) {
-		bytes_sent = sendto(sd_out, &battelle_spat, sizeof(battelle_spat_t), 0,
+		bytes_sent = sendto(datamgr_out, &battelle_spat, sizeof(battelle_spat_t), 0,
 			(struct sockaddr *) &snd_addr, sizeof(snd_addr));
 	}
 	else {
@@ -363,8 +393,8 @@ no_control = 0;
                         battelle_spat.movement[i].max_time_remaining.maxtimeremaining
                 );
                 sprintf(strbuf+(12*(i+1))+1, "\n");
-		bytes_sent = sendto(sd_out, strbuf, sizeof(strbuf), 0,
-		     (struct sockaddr *) &snd_addr, sizeof(snd_addr));
+//		bytes_sent = sendto(datamgr_out, strbuf, sizeof(strbuf), 0,
+//		     (struct sockaddr *) &snd_addr, sizeof(snd_addr));
 	}
 
 	fflush(NULL);
@@ -408,23 +438,27 @@ no_control = 0;
 	return retval;
 }
 
-int OpenTSCPConnection(char *controllerIP, char *port) {
+int OpenTCPIPConnection(char *controllerIP, unsigned short port) {
         struct addrinfo hints;
         struct addrinfo *result, *rp;
         int sfd, s;
+	char port_str[6];
+
+	sprintf(port_str, "%hu", port);
 
         /* Obtain address(es) matching host/port */
         memset(&hints, 0, sizeof(struct addrinfo));
         hints.ai_family = AF_UNSPEC;    /* Allow IPv4 or IPv6 */
         hints.ai_socktype = SOCK_STREAM; /* TCP socket */
         hints.ai_flags = 0;
-        hints.ai_protocol = 0;     /* Any protocol */
-        s = getaddrinfo(controllerIP, port, &hints, &result);
+        hints.ai_protocol = IPPROTO_TCP;     /* Any protocol */
+        s = getaddrinfo(controllerIP, port_str, &hints, &result);
         if (s != 0) {
                 fprintf(stderr, "getaddrinfo: %s\n", gai_strerror(s));
                 exit(EXIT_FAILURE);
         }
 
+        /* Obtain address(es) matching host/port */
         /* getaddrinfo() returns a list of address structures.
         Try each address until we successfully connect(2).
         If socket(2) (or connect(2)) fails, we (close the socket
