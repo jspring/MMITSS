@@ -4,6 +4,7 @@
 #define AB3418COMM_H
 
 #include "msgs.h"
+#include "mmitss_ports_and_message_numbers.h"
 
 #define DB_2070_TIMING_SET_TYPE	5501
 #define DB_2070_TIMING_SET_VAR	DB_2070_TIMING_SET_TYPE
@@ -114,31 +115,31 @@ typedef struct {
 } IS_PACKED plan_params_t; 
 
 typedef struct {
-	unsigned char obj_id; 	//Object ID; set to 0x01
-	unsigned char size;	//Message size, not including obj_id and size; set to 0x31
-	unsigned char permitted_phases;	//Bit-mapped with permitted phases
-	unsigned char min_green[8];	//Minimum green, sec
-	unsigned char max_green[8];	//Maximum green, sec
-	unsigned char ped_walk[8];	//Pedestrian walk, sec
-	unsigned char ped_clr[8];	//Pedestrian clear time (i.e. flash don't walk), sec
-	unsigned char yellow[8];	//Phase yellow time, sec
-	unsigned char red_clr[8];	//Phase all-red, sec
+	unsigned char obj_id; 		//Byte 7: Object ID; set to 0x01
+	unsigned char size;		//Byte 8: Message size, not including obj_id and size; set to 0x31
+	unsigned char permitted_phases;	//Byte 9: Bit-mapped with permitted phases
+	unsigned char min_green[8];	//Byte 10: Minimum green, sec
+	unsigned char max_green[8];	//Byte 18: Maximum green, sec
+	unsigned char ped_walk[8];	//Byte 26: Pedestrian walk, sec
+	unsigned char ped_clr[8];	//Byte 34: Pedestrian clear time (i.e. flash don't walk), sec
+	unsigned char yellow[8];	//Byte 42: Phase yellow time, sec
+	unsigned char red_clr[8];	//Byte 50: Phase all-red, sec
 } IS_PACKED phase_timing_params_t;
 
 typedef struct {
-	unsigned char obj_id; 	//Object ID; set to 0x02
-	unsigned char size;	//Message size, not including obj_id and size; set to 0x0C
-	unsigned char plan_num;	//Coordination plan number 
-	unsigned char cycle_length;	//Cycle length
-	unsigned char offset;	//Current offset (A, B, or C)
-	unsigned char coord_phase;	//Coordination phase; bit-mapped
-	unsigned char green_factor[8];	//Green factor
+	unsigned char obj_id; 		//Byte 58: Object ID; set to 0x02
+	unsigned char size;		//Byte 59: Message size, not including obj_id and size; set to 0x0C
+	unsigned char plan_num;		//Byte 60: Coordination plan number 
+	unsigned char cycle_length;	//Byte 61: Cycle length
+	unsigned char offset;		//Byte 62: Current offset (A, B, or C)
+	unsigned char coord_phase;	//Byte 63: Coordination phase; bit-mapped
+	unsigned char green_factor[8];	//Byte 64: Green factor
 } IS_PACKED  coordination_plan_params_t;
 	
+
+#define	SIGNAL_PLAN_MSG	0x33
 typedef struct {
-	unsigned short 	internal_msg_header; 	// set to 0xffff
-	unsigned char	msg_id;		    	// set to 0x01
-	unsigned int	ms_since_midnight;	// time since midnight, 0.001 s resolution
+	mmitss_msg_hdr_t	mmitss_msg_hdr;
 	phase_timing_params_t phase_timing_params;
 	coordination_plan_params_t coordination_plan_params;
 } IS_PACKED sig_plan_msg_t;
@@ -155,6 +156,11 @@ typedef struct {
 	unsigned char obj_id; //=0x02
 	unsigned char size; //=0x01
 	unsigned char intersection_status;
+#define INTERSECTION_STATUS_MANUAL		0
+#define INTERSECTION_STATUS_STOP_TIME		1
+#define INTERSECTION_STATUS_CONFLICT_FLASH	2
+#define INTERSECTION_STATUS_PREEMPT		3
+#define INTERSECTION_STATUS_PRIORITY		4
 } IS_PACKED intersection_status_t;
 
 typedef struct {
@@ -173,19 +179,19 @@ typedef struct {
 
 typedef struct {
 	unsigned char obj_id; //=0x06
-	unsigned char size; //=32
-	unsigned char currentstate[NUM_LANES][4];
+	unsigned char size; //=4
+	unsigned int currentstate;
 } IS_PACKED current_state_t;
 
 typedef struct {
 	unsigned char obj_id; //=0x07
-	unsigned char size; //=1
+	unsigned char size; //=2
 	unsigned short mintimeremaining;
 } IS_PACKED min_time_remaining_t;
 
 typedef struct {
 	unsigned char obj_id; //=0x08
-	unsigned char size; //=1
+	unsigned char size; //=2
 	unsigned short maxtimeremaining;
 } IS_PACKED max_time_remaining_t;
 
@@ -198,8 +204,8 @@ typedef struct {
 #define MAX_PHASES	8
 typedef struct {
 	unsigned char obj_id; //=0x0A
-	unsigned char size; //=16
-	unsigned short yellowtime[MAX_PHASES]; //=yellow timing parameter
+	unsigned char size; //=2
+	unsigned short yellowtime; //=yellow timing parameter
 } IS_PACKED yellow_time_t;
 
 typedef struct {
@@ -231,11 +237,15 @@ typedef struct {
 } IS_PACKED movement_t;
 
 typedef struct {
-	unsigned char intersection_id; 		//=0x01
-	unsigned char intersection_id_size;	//=0x04
+	unsigned char DSRCmsgID; 		//=0x8d
+	unsigned char content_version;		//message counter
+	unsigned short size;			//payload size
+	intersection_id_t intersection_id;
+	intersection_status_t intersection_status;
 	message_timestamp_t message_timestamp;
-	movement_t movement[MAX_PHASES];			//
-	unsigned char end_of_blob;		//=0xFF
+//	movement_t movement[MAX_PHASES];			//
+	movement_t movement[4];			//
+	unsigned short MsgCRC;		//=0xFF
 } IS_PACKED battelle_spat_t;
 
 typedef struct {
