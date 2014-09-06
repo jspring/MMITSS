@@ -77,26 +77,26 @@ typedef struct
  * format. */
 typedef struct
 {
-	char          start_flag;   /* 0x7e */
-	char          address;      /* Byte 2 0x05 Requester PC */
-	char          control;      /* Byte 3 0x13 - unnumbered information, individual address */
-	char          ipi;          /* Byte 4 0xc0 - NTCIP Class B Protocol */
-	char          mess_type;    /* Byte 5 0xcc - get long status8 response */
-	unsigned char flags;        /* Byte 6 Additional flags; bit 0:focus (default 0 = no focus),
+	char          start_flag;   /* Byte 0 0x7e */
+	char          address;      /* Byte 1 0x05 Requester PC */
+	char          control;      /* Byte 2 0x13 - unnumbered information, individual address */
+	char          ipi;          /* Byte 3 0xc0 - NTCIP Class B Protocol */
+	char          mess_type;    /* Byte 4 0xcc - get long status8 response */
+	unsigned char flags;        /* Byte 5 Additional flags; bit 0:focus (default 0 = no focus),
 	                             * bits 1-7: reserved, unused. */
-	unsigned char status;       /* Byte 7 Bit 7 = critical alarm; bit 6 = non-critical alarm;
+	unsigned char status;       /* Byte 6 Bit 7 = critical alarm; bit 6 = non-critical alarm;
 	                             * bit 5 = detector fault; bit 4 = coordination alarm;
 	                             * bit 3 = local override; bit 2 = passed local zero;
 	                             * bit 1 = cabinet flash; bit 0 = preempt. */
-	unsigned char pattern;      /* Byte 8 Pattern (0-250, 251-253 reserved, 254 flash, 255 free) */
-	unsigned char green_yellow_overlap; /* Byte 9 Bits 0-3 green overlaps A-D;
+	unsigned char pattern;      /* Byte 7 Pattern (0-250, 251-253 reserved, 254 flash, 255 free) */
+	unsigned char green_yellow_overlap; /* Byte 8 Bits 0-3 green overlaps A-D;
 	                              * bits 4-7 yellow overlaps A-D */
-	unsigned char preemption;    /* Byte 10 Bits 0-1 EV A-D; bits 4-6 RR 1-2;
+	unsigned char preemption;    /* Byte 9 Bits 0-3 EV A-D; bits 4-5 RR 1-2;
 	                              * bit 6 = pattern transition; bit 7 unused */
-	unsigned char phase_call;    /* Byte 11 Phase call 1-8; (bit 7 = phase 8; bit 0 = phase 1) */
-	unsigned char ped_call;      /* Byte 12 Ped call 1-8; (bit 7 = ped 8; bit 0 = ped 1) */
-	unsigned char active_phase;  /* Byte 13 Bits 0-7 -> phases 1-8; bit set true for phase active */
-	unsigned char interval;      /* Byte 14 Bits 0-3: ring 0 interval; bits 4-7: ring 1 interval.
+	unsigned char phase_call;    /* Byte 10 Phase call 1-8; (bit 7 = phase 8; bit 0 = phase 1) */
+	unsigned char ped_call;      /* Byte 11 Ped call 1-8; (bit 7 = ped 8; bit 0 = ped 1) */
+	unsigned char active_phase;  /* Byte 12 Bits 0-7 -> phases 1-8; bit set true for phase active */
+	unsigned char interval;      /* Byte 13 Bits 0-3: ring 0 interval; bits 4-7: ring 1 interval.
 	                              * Interval encoding is as follows:
                                       * 0X00 = walk, 0x01 = don't walk, 0x02 = min green,
 	                              * 0x03 = unused, 0x04 = added initial, 0x05 = passage -resting,
@@ -104,37 +104,37 @@ typedef struct
 	                              * 0x09 = preemption, 0x0a = stop time, 0x0b = red revert,
 	                              * 0x0c = max termination, 0x0d = gap termination,
 	                              * 0x0e = force off, 0x0f = red clearance */
-	unsigned char presence1;     /* Byte 15 Bits 0-7: detector 1-8. Presence bits set true for
+	unsigned char presence1;     /* Byte 14 Bits 0-7: detector 1-8. Presence bits set true for
 	                              * positive presence. */
-	unsigned char presence2;     /* Byte 16 Bits 0-7: detector 9-16 */
-	unsigned char presence3;     /* Byte 17 Bits 0-7: detector 17-24 */
-	unsigned char presence4;     /* Byte 18 Bits 0-3: detector 25-28, bits 4-7 unused */
-	unsigned char master_clock;  /* Byte 19 Master background cycle clock.  Counts up to cycle length */
-	unsigned char local_clock;   /* Byte 20 Local cycle clock.  Counts up to cycle length. */
-	unsigned char seq_number;    /* Byte 21 Sample sequence number */
-	unsigned char volume1;       /* Byte 22 System detector 1 */
-	unsigned char occupancy1;    /* Byte 23 System detector 1.  Value 0-200 = detector occupancy in
+	unsigned char presence2;     /* Byte 15 Bits 0-7: detector 9-16 */
+	unsigned char presence3;     /* Byte 16 Bits 0-7: detector 17-24 */
+	unsigned char presence4;     /* Byte 17 Bits 0-3: detector 25-28, bits 4-7 unused */
+	unsigned char master_clock;  /* Byte 18 Master background cycle clock.  Counts up to cycle length */
+	unsigned char local_clock;   /* Byte 19 Local cycle clock.  Counts up to cycle length. */
+	unsigned char seq_number;    /* Byte 20 Sample sequence number */
+	unsigned char volume1;       /* Byte 21 System detector 1 */
+	unsigned char occupancy1;    /* Byte 22 System detector 1.  Value 0-200 = detector occupancy in
 	                              * 0.5% increments, 201-209 = reserved, 210 = stuck ON fault,
 	                              * 211 = stuck OFF fault, 212 = open loop fault,
 	                              * 213 = shorted loop fault, 214 = excessive inductance fault,
 	                              * 215 = overcount fault. */
-	unsigned char volume2;       /* Byte 24 System detector 2 */
-	unsigned char occupancy2;    /* Byte 25 system detector 2 */
-	unsigned char volume3;       /* Byte 26 System detector 3 */
-	unsigned char occupancy3;    /* Byte 27 system detector 3 */
-	unsigned char volume4;       /* Byte 28 System detector 4 */
-	unsigned char occupancy4;    /* Byte 29 system detector 4 */
-	unsigned char volume5;       /* Byte 30 System detector 5 */
-	unsigned char occupancy5;    /* Byte 31 system detector 5 */
-	unsigned char volume6;       /* Byte 32 System detector 6 */
-	unsigned char occupancy6;    /* Byte 33 system detector 6 */
-	unsigned char volume7;       /* Byte 34 System detector 7 */
-	unsigned char occupancy7;    /* Byte 35 system detector 7 */
-	unsigned char volume8;       /* Byte 36 System detector 8 */
-	unsigned char occupancy8;    /* Byte 37 system detector 8 */
-	unsigned char FCSmsb;        /* Byte 38 FCS (Frame Checking Sequence) MSB */
-	unsigned char FCSlsb;        /* Byte 39 FCS least significant byte */
-	char          end_flag;      /* Byte 40 0x7e */
+	unsigned char volume2;       /* Byte 23 System detector 2 */
+	unsigned char occupancy2;    /* Byte 24 system detector 2 */
+	unsigned char volume3;       /* Byte 25 System detector 3 */
+	unsigned char occupancy3;    /* Byte 26 system detector 3 */
+	unsigned char volume4;       /* Byte 27 System detector 4 */
+	unsigned char occupancy4;    /* Byte 28 system detector 4 */
+	unsigned char volume5;       /* Byte 29 System detector 5 */
+	unsigned char occupancy5;    /* Byte 30 system detector 5 */
+	unsigned char volume6;       /* Byte 31 System detector 6 */
+	unsigned char occupancy6;    /* Byte 32 system detector 6 */
+	unsigned char volume7;       /* Byte 33 System detector 7 */
+	unsigned char occupancy7;    /* Byte 34 system detector 7 */
+	unsigned char volume8;       /* Byte 35 System detector 8 */
+	unsigned char occupancy8;    /* Byte 36 system detector 8 */
+	unsigned char FCSmsb;        /* Byte 37 FCS (Frame Checking Sequence) MSB */
+	unsigned char FCSlsb;        /* Byte 38 FCS least significant byte */
+	char          end_flag;      /* Byte 39 0x7e */
 } IS_PACKED get_long_status8_resp_mess_typ;
 
 typedef struct {
