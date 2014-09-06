@@ -315,7 +315,7 @@ if(verbose) {
 //				(struct sockaddr *) &snd_addr, sizeof(snd_addr));
 			    bytes_sent = write(datamgr_out, &sig_plan_msg, sizeof(sig_plan_msg_t));
 			else {
-				datamgr_out = OpenTCPIPConnection("localhost", (unsigned short)TRAF_CTL_IFACE_PORT);
+				datamgr_out = OpenTCPIPConnection("localhost", (unsigned short)TRAF_CTL_IFACE_OUTPORT);
 				datamgr_in = datamgr_out;
 
 				//Zero out saved fds
