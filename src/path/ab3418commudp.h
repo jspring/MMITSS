@@ -156,11 +156,11 @@ typedef struct {
 	unsigned char obj_id; //=0x02
 	unsigned char size; //=0x01
 	unsigned char intersection_status;
-#define INTERSECTION_STATUS_MANUAL		0
-#define INTERSECTION_STATUS_STOP_TIME		1
-#define INTERSECTION_STATUS_CONFLICT_FLASH	2
-#define INTERSECTION_STATUS_PREEMPT		3
-#define INTERSECTION_STATUS_PRIORITY		4
+#define INTERSECTION_STATUS_MANUAL		0x00
+#define INTERSECTION_STATUS_STOP_TIME		0x02
+#define INTERSECTION_STATUS_CONFLICT_FLASH	0x04
+#define INTERSECTION_STATUS_PREEMPT		0x08
+#define INTERSECTION_STATUS_PRIORITY		0x10
 } IS_PACKED intersection_status_t;
 
 typedef struct {
