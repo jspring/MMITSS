@@ -7,9 +7,15 @@
 #include "ab3418_libudp.h"
 #include "ab3418commudp.h"
 #include <udp_utils.h>
-#include "Battelle_SPaT_MIB.h"
 #include "local.h"
+
 #include "mmitss_ports_and_message_numbers.h"
+
+#include "asn_application.h"
+#include "asn_internal.h"       /* for _ASN_DEFAULT_STACK_MAX */
+
+#include "SPAT.h"
+#include "TimeMark.h"
 
 static jmp_buf exit_env;
 
@@ -32,7 +38,9 @@ static int sig_list[] =
 
 int OpenTCPIPConnection(char *controllerIP, unsigned short port);
 int process_phase_status( get_long_status8_resp_mess_typ *pstatus, int verbose, unsigned char greens, phase_status_t *pphase_status);
-extern int spat2battelle(raw_signal_status_msg_t *ca_spat, battelle_spat_t *battelle_spat, phase_timing_t *phase_timing[8], int verbose);
+int init_spat(SPAT_t *spatType, MovementState_t *MoveState[], char *spatbuf, int *spatbufsize, sig_plan_msg_t *sig_plan_msg, raw_signal_status_msg_t *raw_signal_status_msg, phase_timing_t *pphase_timing[], get_long_status8_resp_mess_typ *long_status8, plan_params_t *pplan_params[], int verbose);
+
+#define NUMMOVEMENTS	4
 
 int main(int argc, char *argv[]) {
 
@@ -55,6 +63,14 @@ int main(int argc, char *argv[]) {
 	plan_params_t plan_params[MAX_PLANS + 1]; //Plan[0]=Free, Plan[10]=Saved plan
 	plan_params_t *pplan_params[MAX_PLANS + 1];
 	battelle_spat_t battelle_spat;
+
+	SPAT_t *spatType;
+	SPAT_t *spatType_decode;
+	MovementState_t movestate[NUMMOVEMENTS];
+	MovementState_t *pmovestate[NUMMOVEMENTS];
+	char spatbuf[1000];
+	int spatbufsize;
+
 	char *pbattelle_spat;
 	mschedule_t mschedule;
 	db_timing_set_2070_t db_timing_set_2070;
@@ -98,13 +114,14 @@ int main(int argc, char *argv[]) {
 	fd_set writefds, writefds_sav;
 	int maxfd = 0;
 	int numready;
-	int use_tcp = 0;
 	unsigned char curr_plan_num = 255;
 	unsigned char curr_plan_num_sav = 255;
 
+        spatType = (SPAT_t *) calloc(1, sizeof(SPAT_t));
+        spatType_decode = (SPAT_t *) calloc(1, sizeof(SPAT_t));
  
 	pbattelle_spat = (char *)&battelle_spat;
-        while ((opt = getopt(argc, argv, "A:S:vi:tna:bo:s:l:h:z")) != -1)
+        while ((opt = getopt(argc, argv, "A:S:vi:na:bo:s:l:h:z")) != -1)
         {
                 switch (opt)
                 {
@@ -118,9 +135,6 @@ int main(int argc, char *argv[]) {
                         break;
                   case 'v':
                         verbose = 1;
-                        break;
-                  case 't':
-                        use_tcp = 1;
                         break;
                   case 'n':
                         no_control = 1;
@@ -139,7 +153,7 @@ int main(int argc, char *argv[]) {
                         break;
 		  case 'z':
 		  default:
-			fprintf(stderr, "Usage: %s -A <AB3418 port, (def. /dev/ttyS0)> -S <CA SPaT port, (def. /dev/ttyS1)> -v (verbose) -i <UDP/TCP input port, def. UDP> -t (use TCP) -b (output binary SPaT message) -s <UDP unicast destination (def. 127.0.0.1)> -o <UDP unicast port> -l <lowest Battelle byte to display> -h <highest Battelle byte to display>\n", argv[0]);
+			fprintf(stderr, "Usage: %s -A <AB3418 port, (def. /dev/ttyS0)> -S <CA SPaT port, (def. /dev/ttyS1)> -v (verbose) -b (output binary SPaT message) -s <UDP unicast destination (def. 127.0.0.1)> -o <UDP unicast port> -l <lowest Battelle byte to display> -h <highest Battelle byte to display>\n", argv[0]);
 			exit(EXIT_FAILURE);
 		}
 	}
@@ -158,11 +172,14 @@ int main(int argc, char *argv[]) {
 	memset(&raw_signal_status_msg, 0, sizeof(raw_signal_status_msg));
 	memset(&snd_addr, 0, sizeof(snd_addr));
 	memset(&battelle_spat, 0, sizeof(battelle_spat_t));
+	memset(spatbuf, 0, sizeof(spatbuf));
 	for(i=0; i<MAX_PHASES; i++) 
 		pphase_timing[i] = &phase_timing[i];
 	for(i=0; i<MAX_PLANS+1; i++) 
 		pplan_params[i] = &plan_params[i];
 
+	for(i=0; i<NUMMOVEMENTS ; i++) 
+		pmovestate[i] = &movestate[i];
 	datamgr_out = OpenTCPIPConnection("localhost", (unsigned short)DATA_MANAGER_PORT);
 	if(datamgr_out >= 0)
 		datamgr_in = datamgr_out;
@@ -260,6 +277,20 @@ while(1) {
 		retval = get_status(wait_for_data, &readBuff, ab3418_fdin, ab3418_fdout, verbose);
 		retval = get_spat(wait_for_data, &raw_signal_status_msg, ca_spat_fdin, verbose, output_spat_binary);
 		memcpy(&long_status8, &readBuff, sizeof(get_long_status8_resp_mess_typ));
+printf("ab3418commudp: Got to 1\n");
+		memset(spatbuf, 0, sizeof(spatbuf));
+		spatbufsize = 0;
+		init_spat(spatType, pmovestate, spatbuf, &spatbufsize, &sig_plan_msg, &raw_signal_status_msg, pphase_timing, &long_status8, pplan_params, verbose);
+printf("ab3418commudp: Got to 2 spatbufsize %d\n", spatbufsize);
+		printf("ab3418commudp: laneCnt (min green): ");
+		for(i = 0; i<NUMMOVEMENTS; i++)
+			printf("#%d %ld ", i+1, *spatType->intersections.list.array[0]->states.list.array[i]->laneCnt);
+		printf("\n");
+printf("spatbuf[147] %hhu\n", spatbuf[147]);
+        printf("Call Decoder...:\n");
+        ber_decode(0, &asn_DEF_SPAT,(void **)&spatType_decode, spatbuf, spatbufsize);
+        xer_fprint(stdout, &asn_DEF_SPAT, spatType_decode);
+		exit(EXIT_SUCCESS);
 
 		retval = build_spat(&sig_plan_msg, &raw_signal_status_msg, pphase_timing, &long_status8, pplan_params, &battelle_spat, verbose);
 		snd_addr.sin_port = temp_port;
@@ -710,3 +741,174 @@ printf("\n");
         return 0;
 }
 */
+
+int init_spat(SPAT_t *spatType, MovementState_t *MoveState[], char *spatbuf, int *spatbufsize, sig_plan_msg_t *sig_plan_msg, raw_signal_status_msg_t *raw_signal_status_msg, phase_timing_t *pphase_timing[], get_long_status8_resp_mess_typ *long_status8, plan_params_t *pplan_params[], int verbose) {
+        
+
+	int ret;
+	asn_enc_rval_t ec; /* Encoder return value */
+	asn_dec_rval_t rval;
+        
+        
+	char *spat_msg_name = "MMITSS_SPaT_msg";
+	char *intersection_name = "El_Camino_and_Matadero";
+	char movement_name[8] = "Phase 1";
+	char intersection_id[2]={0x12, 0x34};
+	char intersection_status;
+	char laneset[4] = {1, 2, 3, 4};
+	int tstemp;
+	long movementcnt = NUMMOVEMENTS;
+	long lanecnt[NUMMOVEMENTS];
+	long SignalLightState[NUMMOVEMENTS];
+	long pedstate[NUMMOVEMENTS];
+	long specialstate[NUMMOVEMENTS];
+	long stateconfidence[NUMMOVEMENTS];
+	long objectcount[NUMMOVEMENTS];
+	long peddetect[NUMMOVEMENTS];
+	long timeToChange[NUMMOVEMENTS];
+	long yellTimeToChange[NUMMOVEMENTS];
+        
+        int i;
+	timestamp_t ts;
+
+
+
+//        SPAT_t * spatType=0;
+
+//        SPAT_t * spatType_decode=0;
+
+
+        IntersectionState_t * this_intersection = 0;
+//        MovementState_t *MoveState[NUMMOVEMENTS] = {NULL};
+
+printf("init_spat: Got to 1\n");
+//	for(i = 0; i < NUMMOVEMENTS; i++)
+//        	MoveState[i] = (MovementState_t *) calloc( 1, sizeof(MovementState_t));
+        this_intersection = (IntersectionState_t *) calloc(1, sizeof(IntersectionState_t));
+//        spatType = (SPAT_t *) calloc(1, sizeof(SPAT_t));
+//        spatType_decode = (SPAT_t *) calloc(1, sizeof(SPAT_t));
+
+	//Define SPAT_t members
+        spatType->msgID = 13;  	//SPAT message ID
+        spatType->name = 	//SPAT intersection name (-1 uses strlen to get size)
+		OCTET_STRING_new_fromBuf(&asn_DEF_OCTET_STRING, spat_msg_name, -1);
+
+
+        this_intersection->name =
+		OCTET_STRING_new_fromBuf(&asn_DEF_OCTET_STRING, intersection_name, -1);
+
+        this_intersection->id =
+		*OCTET_STRING_new_fromBuf(&asn_DEF_OCTET_STRING, intersection_id, 2);  //IntersectionID
+
+
+	//IntersectionStatusObject
+        if( (long_status8->pattern == 254) || (long_status8->status == 2) )
+                intersection_status = INTERSECTION_STATUS_CONFLICT_FLASH;
+        else if(long_status8->preemption != 0)
+                intersection_status = INTERSECTION_STATUS_PREEMPT;
+        else if( ((long_status8->interval & 0x0f) == 0x0a) || ((long_status8->interval & 0xf0) == 0xa0) )
+                intersection_status = INTERSECTION_STATUS_STOP_TIME;
+        else
+                intersection_status = INTERSECTION_STATUS_MANUAL;
+        this_intersection->status =
+		*OCTET_STRING_new_fromBuf(&asn_DEF_OCTET_STRING, &intersection_status, 1);  //IntersectionStatusObject
+
+        //TimeMark
+        get_current_timestamp(&ts);
+        tstemp = (1000 * ((3600 * ts.hour) + (60 * ts.min) + ts.sec)) + ts.millisec;
+        this_intersection->timeStamp = (TimeMark_t *)&tstemp;
+
+        //lanesCnt: Number of Movement States to follow
+        this_intersection->lanesCnt = &movementcnt;
+
+	//Define SPAT_t->IntersectionState_t members
+        //Sequence of IntersectionState (there's only one intersection per MRP)
+printf("init_spat: Got to 2\n");
+        asn_sequence_add(&spatType->intersections, this_intersection);
+
+printf("init_spat: Got to 3\n");
+for(i = 0; i<NUMMOVEMENTS; i++) {
+printf("init_spat: Got to 4.%d\n", i);
+        //MovementState No1.
+	sprintf(movement_name, "Phase %d", i+1);
+        MoveState[i]->movementName =
+		OCTET_STRING_new_fromBuf(&asn_DEF_OCTET_STRING, movement_name, -1);  //movementName
+	lanecnt[i] = pphase_timing[i]->min_green;
+        MoveState[i]->laneCnt = &lanecnt[i];  //lane count
+        ret=OCTET_STRING_fromBuf(&MoveState[i]->laneSet, laneset, 4);  //lane set
+        //SignalLightState - Motorised lane
+        SignalLightState[i] |= 1<<0;  //Greenball
+        MoveState[i]->currState = &SignalLightState[i];
+        //Ped state
+        pedstate[i] = 1;   //do not walk
+        MoveState[i]->pedState = &pedstate[i];
+        //Special state
+        specialstate[i] = 0;
+        MoveState[i]->specialState = &specialstate[i];
+        //time to change
+        timeToChange[i] = 200;
+        MoveState[i]->timeToChange = timeToChange[i];
+        //state confidence
+        stateconfidence[i] = 0;
+        MoveState[i]->stateConfidence = &stateconfidence[i];
+        //yellow stsate - the next state of a motorised lane
+        SignalLightState[i] = 0;  //reset the signal states
+        SignalLightState[i] |= 1<<1;  //Yellowball
+        MoveState[i]->yellState = &SignalLightState[i];
+        //yellowped state
+        pedstate[i] = 0;
+        pedstate[i] |= 1<<0;   //do not walk
+        MoveState[i]->yellPedState = &pedstate[i];
+        //yellow time to change
+        yellTimeToChange[i] = 12001;
+        MoveState[i]->yellTimeToChange = (TimeMark_t *)&yellTimeToChange[i];
+        //yellow state confidence
+        stateconfidence[i] = 0;
+        MoveState[i]->yellStateConfidence = &stateconfidence[i];
+        //vehicle count
+        objectcount[i] = 20;
+        MoveState[i]->vehicleCount = &objectcount[i];
+        //ped detect
+        peddetect[i] |= 1<<1;
+        MoveState[i]->pedDetect = &peddetect[i];
+        //ped count
+        objectcount[i] = 10;
+        MoveState[i]->pedCount=&objectcount[i];
+
+        asn_sequence_add(&spatType->intersections.list.array[0]->states, MoveState[i]);
+printf("lanecnt %d %d\n", i, lanecnt[i]);
+}
+    printf("Call Encoder...\n");
+        ec = der_encode_to_buffer(&asn_DEF_SPAT, spatType, spatbuf, 1000);
+
+//	if(spatbuf[1] == 0x82) {
+		*spatbufsize = (spatbuf[2] << 8) + spatbuf[3] + 4;
+		printf("Got to 1 spatbufsize %d %u\n", *spatbufsize, *spatbufsize);
+/*	}
+	else {
+		if(spatbuf[1] == 0x81) {
+			*spatbufsize = spatbuf[2] + 3;
+			printf("Got to 2 spatbufsize %d %u\n", *spatbufsize, *spatbufsize);
+		}
+		else {
+			*spatbufsize = spatbuf[1] + 2;
+			printf("Got to 3 spatbufsize %d %u\n", *spatbufsize, *spatbufsize);
+		}
+	}
+*/
+        printf("Buffer after encoding: spatbufsize %d spatbuf[1] %#hhx spatbuf[2] %#hhx spatbuf[3] %#hhx \n", *spatbufsize, spatbuf[1], spatbuf[2], spatbuf[3]);
+        for(i=0;i < *spatbufsize; i++)
+                printf("#%d %x\t", i, (uint8_t) spatbuf[i]);
+
+        printf("\n");
+//        printf("Call Decoder...:\n");
+//        rval = ber_decode(0, &asn_DEF_SPAT,(void **)&spatType_decode, spatbuf, spatbufsize);
+//        xer_fprint(stdout, &asn_DEF_SPAT, spatType_decode);
+
+
+//        printf("\nmsgID=%d Timetochange=%d\n",spatType_decode->msgID,spatType_decode->intersections.list.array[0]->states.list.array[1]->timeToChange);
+
+//        getchar();
+//free(spatType);
+		return 0;
+}
