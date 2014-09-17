@@ -20,7 +20,6 @@
 #define PERF_OBSRV_INPORT		6013
 #define NOMADIC_DEV_OUTPORT		6014
 #define NOMADIC_DEV_INPORT		6015
-#define DATA_MANAGER_PORT		6016
 
 // The MMITSS message header convention is:
 //   Header     InternalMsgHeader -- two bytes (0xFFFF)
