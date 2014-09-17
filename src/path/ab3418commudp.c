@@ -38,9 +38,9 @@ static int sig_list[] =
 
 int OpenTCPIPConnection(char *controllerIP, unsigned short port);
 int process_phase_status( get_long_status8_resp_mess_typ *pstatus, int verbose, unsigned char greens, phase_status_t *pphase_status);
-int init_spat(SPAT_t *spatType, MovementState_t *MoveState[], char *spatbuf, int *spatbufsize, sig_plan_msg_t *sig_plan_msg, raw_signal_status_msg_t *raw_signal_status_msg, phase_timing_t *pphase_timing[], get_long_status8_resp_mess_typ *long_status8, plan_params_t *pplan_params[], int verbose);
+int init_spat(SPAT_t *spatType, unsigned char *spatbuf, int *spatbufsize, sig_plan_msg_t *sig_plan_msg, raw_signal_status_msg_t *raw_signal_status_msg, phase_timing_t *pphase_timing[], get_long_status8_resp_mess_typ *long_status8, plan_params_t *pplan_params[], int verbose);
 
-#define NUMMOVEMENTS	4
+#define NUMMOVEMENTS	1
 
 int main(int argc, char *argv[]) {
 
@@ -62,16 +62,14 @@ int main(int argc, char *argv[]) {
 	raw_signal_status_msg_t raw_signal_status_msg;
 	plan_params_t plan_params[MAX_PLANS + 1]; //Plan[0]=Free, Plan[10]=Saved plan
 	plan_params_t *pplan_params[MAX_PLANS + 1];
-	battelle_spat_t battelle_spat;
 
 	SPAT_t *spatType;
+        IntersectionState_t *this_intersection;
 	SPAT_t *spatType_decode;
 	MovementState_t movestate[NUMMOVEMENTS];
-	MovementState_t *pmovestate[NUMMOVEMENTS];
-	char spatbuf[1000];
+	unsigned char spatbuf[1000];
 	int spatbufsize;
 
-	char *pbattelle_spat;
 	mschedule_t mschedule;
 	db_timing_set_2070_t db_timing_set_2070;
 	db_timing_get_2070_t db_timing_get_2070;
@@ -119,8 +117,12 @@ int main(int argc, char *argv[]) {
 
         spatType = (SPAT_t *) calloc(1, sizeof(SPAT_t));
         spatType_decode = (SPAT_t *) calloc(1, sizeof(SPAT_t));
+        this_intersection = (IntersectionState_t *) calloc(1, sizeof(IntersectionState_t));
+        asn_sequence_add(&spatType->intersections, this_intersection);
+	for(i=0; i<NUMMOVEMENTS ; i++) {
+        	asn_sequence_add(&spatType->intersections.list.array[0]->states, &movestate[i]);
+	}
  
-	pbattelle_spat = (char *)&battelle_spat;
         while ((opt = getopt(argc, argv, "A:S:vi:na:bo:s:l:h:z")) != -1)
         {
                 switch (opt)
@@ -171,16 +173,13 @@ int main(int argc, char *argv[]) {
 	memset(&db_timing_set_2070, 0, sizeof(db_timing_set_2070));
 	memset(&raw_signal_status_msg, 0, sizeof(raw_signal_status_msg));
 	memset(&snd_addr, 0, sizeof(snd_addr));
-	memset(&battelle_spat, 0, sizeof(battelle_spat_t));
 	memset(spatbuf, 0, sizeof(spatbuf));
 	for(i=0; i<MAX_PHASES; i++) 
 		pphase_timing[i] = &phase_timing[i];
 	for(i=0; i<MAX_PLANS+1; i++) 
 		pplan_params[i] = &plan_params[i];
 
-	for(i=0; i<NUMMOVEMENTS ; i++) 
-		pmovestate[i] = &movestate[i];
-	datamgr_out = OpenTCPIPConnection("localhost", (unsigned short)DATA_MANAGER_PORT);
+	datamgr_out = OpenTCPIPConnection("localhost", (unsigned short)TRAF_CTL_IFACE_OUTPORT);
 	if(datamgr_out >= 0)
 		datamgr_in = datamgr_out;
         /* Initialize serial port. */
@@ -277,30 +276,29 @@ while(1) {
 		retval = get_status(wait_for_data, &readBuff, ab3418_fdin, ab3418_fdout, verbose);
 		retval = get_spat(wait_for_data, &raw_signal_status_msg, ca_spat_fdin, verbose, output_spat_binary);
 		memcpy(&long_status8, &readBuff, sizeof(get_long_status8_resp_mess_typ));
-printf("ab3418commudp: Got to 1\n");
+//printf("ab3418commudp: Got to 1\n");
 		memset(spatbuf, 0, sizeof(spatbuf));
 		spatbufsize = 0;
-		init_spat(spatType, pmovestate, spatbuf, &spatbufsize, &sig_plan_msg, &raw_signal_status_msg, pphase_timing, &long_status8, pplan_params, verbose);
-printf("ab3418commudp: Got to 2 spatbufsize %d\n", spatbufsize);
-		printf("ab3418commudp: laneCnt (min green): ");
-		for(i = 0; i<NUMMOVEMENTS; i++)
-			printf("#%d %ld ", i+1, *spatType->intersections.list.array[0]->states.list.array[i]->laneCnt);
-		printf("\n");
-printf("spatbuf[147] %hhu\n", spatbuf[147]);
-        printf("Call Decoder...:\n");
-        ber_decode(0, &asn_DEF_SPAT,(void **)&spatType_decode, spatbuf, spatbufsize);
-        xer_fprint(stdout, &asn_DEF_SPAT, spatType_decode);
-		exit(EXIT_SUCCESS);
+		init_spat(spatType, spatbuf, &spatbufsize, &sig_plan_msg, &raw_signal_status_msg, pphase_timing, &long_status8, pplan_params, verbose);
+printf("ab3418commudp: Got to 2 spatbufsize %d sizeof(spatbuf) %d\n", spatbufsize, sizeof(spatbuf));
+               	 printf("spatbuf:\n");
+        	for(i=0;i < spatbufsize; i++)
+               	 printf("#%d %x\t", i, (uint8_t) spatbuf[i]);
+               	 printf("\n");
+//        printf("Call Decoder...:\n");
+//        ber_decode(0, &asn_DEF_SPAT,(void **)&spatType_decode, spatbuf, spatbufsize);
+//        xer_fprint(stdout, &asn_DEF_SPAT, spatType_decode);
+//		exit(EXIT_SUCCESS);
 
-		retval = build_spat(&sig_plan_msg, &raw_signal_status_msg, pphase_timing, &long_status8, pplan_params, &battelle_spat, verbose);
+//		retval = build_spat(&sig_plan_msg, &raw_signal_status_msg, pphase_timing, &long_status8, pplan_params, &battelle_spat, verbose);
 		snd_addr.sin_port = temp_port;
 		snd_addr.sin_addr.s_addr = temp_addr;
 if(verbose) {                                           
-        printf("ab3418commudp build_spat:\n");
-        for(j=0; j<sizeof(battelle_spat_t); j+=10){             
+        printf("ab3418commudp print spatbuf:\n");
+        for(j=0; j<spatbufsize; j+=10){             
                 printf("%d: ", j);                                  
                 for(i=0; i<10; i++)                                 
-                        printf("%hhx ", pbattelle_spat[j+i]);           
+                        printf("%hhx ", spatbuf[j+i]);           
                 printf("\n");
         }                                                       
 }                                                       
@@ -308,7 +306,7 @@ if(verbose) {
 		if(low_battelle >= 0) {
 			printf("ab3418udp:Battelle Spat: ");
 			for(i=low_battelle; i <= high_battelle; i++)
-				printf("#%d %#hhx ", i, pbattelle_spat[i]);
+				printf("#%d %#hhx ", i, spatbuf[i]);
 			printf("\n");
 		}
 		if(long_status8.pattern < 252) 
@@ -380,7 +378,7 @@ if(verbose) {
 			}
 
 		}
-	    bytes_sent = write(datamgr_out, &battelle_spat, sizeof(battelle_spat_t));
+	    bytes_sent = write(datamgr_out, &spatbuf, spatbufsize);
 //exit(EXIT_SUCCESS);
 	}
 	if( (datamgr_in >=0) && (FD_ISSET(datamgr_in, &readfds)) ) {
@@ -412,21 +410,21 @@ no_control = 0;
 	}
 
 	if(output_spat_binary) {
-		bytes_sent = sendto(datamgr_out, &battelle_spat, sizeof(battelle_spat_t), 0,
+		bytes_sent = sendto(datamgr_out, &spatbuf, spatbufsize, 0,
 			(struct sockaddr *) &snd_addr, sizeof(snd_addr));
 	}
-	else {
-		memset(strbuf, 0, sizeof(strbuf));
-		for(i=0; i<8; i++)
-                sprintf(strbuf+(12*i), "#%u %hhu %hhu ",
-			i+1,
-                        battelle_spat.movement[i].min_time_remaining.mintimeremaining,
-                        battelle_spat.movement[i].max_time_remaining.maxtimeremaining
-                );
-                sprintf(strbuf+(12*(i+1))+1, "\n");
+//	else {
+//		memset(strbuf, 0, sizeof(strbuf));
+//		for(i=0; i<8; i++)
+//                sprintf(strbuf+(12*i), "#%u %hhu %hhu ",
+//			i+1,
+//                        battelle_spat.movement[i].min_time_remaining.mintimeremaining,
+//                        battelle_spat.movement[i].max_time_remaining.maxtimeremaining
+//                );
+//                sprintf(strbuf+(12*(i+1))+1, "\n");
 //		bytes_sent = sendto(datamgr_out, strbuf, sizeof(strbuf), 0,
 //		     (struct sockaddr *) &snd_addr, sizeof(snd_addr));
-	}
+//	}
 
 	fflush(NULL);
 
@@ -742,7 +740,7 @@ printf("\n");
 }
 */
 
-int init_spat(SPAT_t *spatType, MovementState_t *MoveState[], char *spatbuf, int *spatbufsize, sig_plan_msg_t *sig_plan_msg, raw_signal_status_msg_t *raw_signal_status_msg, phase_timing_t *pphase_timing[], get_long_status8_resp_mess_typ *long_status8, plan_params_t *pplan_params[], int verbose) {
+int init_spat(SPAT_t *spatType, unsigned char *spatbuf, int *spatbufsize, sig_plan_msg_t *sig_plan_msg, raw_signal_status_msg_t *raw_signal_status_msg, phase_timing_t *pphase_timing[], get_long_status8_resp_mess_typ *long_status8, plan_params_t *pplan_params[], int verbose) {
         
 
 	int ret;
@@ -757,16 +755,16 @@ int init_spat(SPAT_t *spatType, MovementState_t *MoveState[], char *spatbuf, int
 	char intersection_status;
 	char laneset[4] = {1, 2, 3, 4};
 	int tstemp;
-	long movementcnt = NUMMOVEMENTS;
-	long lanecnt[NUMMOVEMENTS];
-	long SignalLightState[NUMMOVEMENTS];
-	long pedstate[NUMMOVEMENTS];
-	long specialstate[NUMMOVEMENTS];
-	long stateconfidence[NUMMOVEMENTS];
-	long objectcount[NUMMOVEMENTS];
-	long peddetect[NUMMOVEMENTS];
-	long timeToChange[NUMMOVEMENTS];
-	long yellTimeToChange[NUMMOVEMENTS];
+	static long movementcnt = NUMMOVEMENTS;
+	static long lanecnt[NUMMOVEMENTS] = {0};
+	static long SignalLightState[NUMMOVEMENTS] = {0};
+	static long pedstate[NUMMOVEMENTS] = {0};
+	static long specialstate[NUMMOVEMENTS] = {0};
+	static long stateconfidence[NUMMOVEMENTS] = {0};
+	static long objectcount[NUMMOVEMENTS] = {0};
+	static long peddetect[NUMMOVEMENTS] = {0};
+	static long timeToChange[NUMMOVEMENTS] = {0};
+	static long yellTimeToChange[NUMMOVEMENTS] = {0};
         
         int i;
 	timestamp_t ts;
@@ -775,18 +773,18 @@ int init_spat(SPAT_t *spatType, MovementState_t *MoveState[], char *spatbuf, int
 
 //        SPAT_t * spatType=0;
 
-//        SPAT_t * spatType_decode=0;
+        SPAT_t * spatType_decode=0;
 
 
-        IntersectionState_t * this_intersection = 0;
+//        IntersectionState_t * this_intersection = 0;
 //        MovementState_t *MoveState[NUMMOVEMENTS] = {NULL};
 
-printf("init_spat: Got to 1\n");
+//printf("init_spat: Got to 1\n");
 //	for(i = 0; i < NUMMOVEMENTS; i++)
 //        	MoveState[i] = (MovementState_t *) calloc( 1, sizeof(MovementState_t));
-        this_intersection = (IntersectionState_t *) calloc(1, sizeof(IntersectionState_t));
+//        this_intersection = (IntersectionState_t *) calloc(1, sizeof(IntersectionState_t));
 //        spatType = (SPAT_t *) calloc(1, sizeof(SPAT_t));
-//        spatType_decode = (SPAT_t *) calloc(1, sizeof(SPAT_t));
+        spatType_decode = (SPAT_t *) calloc(1, sizeof(SPAT_t));
 
 	//Define SPAT_t members
         spatType->msgID = 13;  	//SPAT message ID
@@ -794,10 +792,10 @@ printf("init_spat: Got to 1\n");
 		OCTET_STRING_new_fromBuf(&asn_DEF_OCTET_STRING, spat_msg_name, -1);
 
 
-        this_intersection->name =
+        spatType->intersections.list.array[0]->name =
 		OCTET_STRING_new_fromBuf(&asn_DEF_OCTET_STRING, intersection_name, -1);
 
-        this_intersection->id =
+        spatType->intersections.list.array[0]->id =
 		*OCTET_STRING_new_fromBuf(&asn_DEF_OCTET_STRING, intersection_id, 2);  //IntersectionID
 
 
@@ -810,95 +808,95 @@ printf("init_spat: Got to 1\n");
                 intersection_status = INTERSECTION_STATUS_STOP_TIME;
         else
                 intersection_status = INTERSECTION_STATUS_MANUAL;
-        this_intersection->status =
+        spatType->intersections.list.array[0]->status =
 		*OCTET_STRING_new_fromBuf(&asn_DEF_OCTET_STRING, &intersection_status, 1);  //IntersectionStatusObject
 
         //TimeMark
         get_current_timestamp(&ts);
         tstemp = (1000 * ((3600 * ts.hour) + (60 * ts.min) + ts.sec)) + ts.millisec;
-        this_intersection->timeStamp = (TimeMark_t *)&tstemp;
+        spatType->intersections.list.array[0]->timeStamp = (TimeMark_t *)&tstemp;
 
         //lanesCnt: Number of Movement States to follow
-        this_intersection->lanesCnt = &movementcnt;
+        spatType->intersections.list.array[0]->lanesCnt = &movementcnt;
 
 	//Define SPAT_t->IntersectionState_t members
         //Sequence of IntersectionState (there's only one intersection per MRP)
-printf("init_spat: Got to 2\n");
-        asn_sequence_add(&spatType->intersections, this_intersection);
+//printf("init_spat: Got to 2\n");
+//        asn_sequence_add(&spatType->intersections, spatType->intersections.list.array[0]);
 
-printf("init_spat: Got to 3\n");
+//printf("init_spat: Got to 3\n");
 for(i = 0; i<NUMMOVEMENTS; i++) {
-printf("init_spat: Got to 4.%d\n", i);
+//printf("init_spat: Got to 4.%d\n", i);
         //MovementState No1.
 	sprintf(movement_name, "Phase %d", i+1);
-        MoveState[i]->movementName =
+        spatType->intersections.list.array[0]->states.list.array[i]->movementName =
 		OCTET_STRING_new_fromBuf(&asn_DEF_OCTET_STRING, movement_name, -1);  //movementName
 	lanecnt[i] = pphase_timing[i]->min_green;
-        MoveState[i]->laneCnt = &lanecnt[i];  //lane count
-        ret=OCTET_STRING_fromBuf(&MoveState[i]->laneSet, laneset, 4);  //lane set
+        spatType->intersections.list.array[0]->states.list.array[i]->laneCnt = &lanecnt[i];  //lane count
+        ret=OCTET_STRING_fromBuf(&spatType->intersections.list.array[0]->states.list.array[i]->laneSet, laneset, 4);  //lane set
         //SignalLightState - Motorised lane
         SignalLightState[i] |= 1<<0;  //Greenball
-        MoveState[i]->currState = &SignalLightState[i];
+        spatType->intersections.list.array[0]->states.list.array[i]->currState = &SignalLightState[i];
         //Ped state
         pedstate[i] = 1;   //do not walk
-        MoveState[i]->pedState = &pedstate[i];
+        spatType->intersections.list.array[0]->states.list.array[i]->pedState = &pedstate[i];
         //Special state
         specialstate[i] = 0;
-        MoveState[i]->specialState = &specialstate[i];
+        spatType->intersections.list.array[0]->states.list.array[i]->specialState = &specialstate[i];
         //time to change
         timeToChange[i] = 200;
-        MoveState[i]->timeToChange = timeToChange[i];
+        spatType->intersections.list.array[0]->states.list.array[i]->timeToChange = timeToChange[i];
         //state confidence
         stateconfidence[i] = 0;
-        MoveState[i]->stateConfidence = &stateconfidence[i];
+        spatType->intersections.list.array[0]->states.list.array[i]->stateConfidence = &stateconfidence[i];
         //yellow stsate - the next state of a motorised lane
         SignalLightState[i] = 0;  //reset the signal states
         SignalLightState[i] |= 1<<1;  //Yellowball
-        MoveState[i]->yellState = &SignalLightState[i];
+        spatType->intersections.list.array[0]->states.list.array[i]->yellState = &SignalLightState[i];
         //yellowped state
         pedstate[i] = 0;
         pedstate[i] |= 1<<0;   //do not walk
-        MoveState[i]->yellPedState = &pedstate[i];
+        spatType->intersections.list.array[0]->states.list.array[i]->yellPedState = &pedstate[i];
         //yellow time to change
         yellTimeToChange[i] = 12001;
-        MoveState[i]->yellTimeToChange = (TimeMark_t *)&yellTimeToChange[i];
+        spatType->intersections.list.array[0]->states.list.array[i]->yellTimeToChange = (TimeMark_t *)&yellTimeToChange[i];
         //yellow state confidence
         stateconfidence[i] = 0;
-        MoveState[i]->yellStateConfidence = &stateconfidence[i];
+        spatType->intersections.list.array[0]->states.list.array[i]->yellStateConfidence = &stateconfidence[i];
         //vehicle count
-        objectcount[i] = 20;
-        MoveState[i]->vehicleCount = &objectcount[i];
+        spatType->intersections.list.array[0]->states.list.array[i]->vehicleCount = &objectcount[i];
         //ped detect
-        peddetect[i] |= 1<<1;
-        MoveState[i]->pedDetect = &peddetect[i];
+//        peddetect[i] |= 1<<1;
+        peddetect[i] = 1;
+        spatType->intersections.list.array[0]->states.list.array[i]->pedDetect = &peddetect[i];
         //ped count
-        objectcount[i] = 10;
-        MoveState[i]->pedCount=&objectcount[i];
+        objectcount[i] += 1;
+        spatType->intersections.list.array[0]->states.list.array[i]->pedCount=&objectcount[i];
 
-        asn_sequence_add(&spatType->intersections.list.array[0]->states, MoveState[i]);
-printf("lanecnt %d %d\n", i, lanecnt[i]);
+//        asn_sequence_add(&spatType->intersections.list.array[0]->states, spatType->intersections.list.array[0]->states.list.array[i]);
+printf("init_spat: Got to 5 lanecnt %d %d objectcount %d\n", i, lanecnt[i], objectcount[i]);
 }
-    printf("Call Encoder...\n");
+//    printf("init_spat: Got to 6 Call Encoder...\n");
         ec = der_encode_to_buffer(&asn_DEF_SPAT, spatType, spatbuf, 1000);
 
-//	if(spatbuf[1] == 0x82) {
+	if(spatbuf[1] == 0x82) {
 		*spatbufsize = (spatbuf[2] << 8) + spatbuf[3] + 4;
-		printf("Got to 1 spatbufsize %d %u\n", *spatbufsize, *spatbufsize);
-/*	}
+		printf("init_spat: Got to 7 spatbufsize %d %u\n", *spatbufsize, *spatbufsize);
+	}
 	else {
 		if(spatbuf[1] == 0x81) {
 			*spatbufsize = spatbuf[2] + 3;
-			printf("Got to 2 spatbufsize %d %u\n", *spatbufsize, *spatbufsize);
+			printf("init_spat: Got to 8 spatbufsize %d %u\n", *spatbufsize, *spatbufsize);
 		}
 		else {
 			*spatbufsize = spatbuf[1] + 2;
-			printf("Got to 3 spatbufsize %d %u\n", *spatbufsize, *spatbufsize);
+			printf("init_spat: Got to 9 spatbufsize %d %u\n", *spatbufsize, *spatbufsize);
 		}
 	}
-*/
-        printf("Buffer after encoding: spatbufsize %d spatbuf[1] %#hhx spatbuf[2] %#hhx spatbuf[3] %#hhx \n", *spatbufsize, spatbuf[1], spatbuf[2], spatbuf[3]);
-        for(i=0;i < *spatbufsize; i++)
-                printf("#%d %x\t", i, (uint8_t) spatbuf[i]);
+
+//        printf("init_spat: Got to 10 Buffer after encoding: spatbufsize %d spatbuf[1] %#hhx spatbuf[2] %#hhx spatbuf[3] %#hhx \n", *spatbufsize, spatbuf[1], spatbuf[2], spatbuf[3]);
+//        for(i=0;i < *spatbufsize; i++)
+//                printf("#%d %x\t", i, (uint8_t) spatbuf[i]);
 
         printf("\n");
 //        printf("Call Decoder...:\n");
