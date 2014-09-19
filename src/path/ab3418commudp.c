@@ -40,7 +40,7 @@ int OpenTCPIPConnection(char *controllerIP, unsigned short port);
 int process_phase_status( get_long_status8_resp_mess_typ *pstatus, int verbose, unsigned char greens, phase_status_t *pphase_status);
 int init_spat(SPAT_t *spatType, unsigned char *spatbuf, int *spatbufsize, sig_plan_msg_t *sig_plan_msg, raw_signal_status_msg_t *raw_signal_status_msg, phase_timing_t *pphase_timing[], get_long_status8_resp_mess_typ *long_status8, plan_params_t *pplan_params[], int verbose);
 
-#define NUMMOVEMENTS	1
+#define NUMMOVEMENTS	2
 
 int main(int argc, char *argv[]) {
 
@@ -740,7 +740,7 @@ printf("\n");
 }
 */
 
-int init_spat(SPAT_t *spatType, unsigned char *spatbuf, int *spatbufsize, sig_plan_msg_t *sig_plan_msg, raw_signal_status_msg_t *raw_signal_status_msg, phase_timing_t *pphase_timing[], get_long_status8_resp_mess_typ *long_status8, plan_params_t *pplan_params[], int verbose) {
+int init_spat(SPAT_t *spatType, unsigned char *spatbuf, int *spatbufsize, sig_plan_msg_t *sig_plan_msg, raw_signal_status_msg_t *ca_spat, phase_timing_t *pphase_timing[], get_long_status8_resp_mess_typ *long_status8, plan_params_t *pplan_params[], int verbose) {
         
 
 	int ret;
@@ -759,6 +759,8 @@ int init_spat(SPAT_t *spatType, unsigned char *spatbuf, int *spatbufsize, sig_pl
 	static long lanecnt[NUMMOVEMENTS] = {0};
 	static long SignalLightState[NUMMOVEMENTS] = {0};
 	static long pedstate[NUMMOVEMENTS] = {0};
+	static long yellstate[NUMMOVEMENTS] = {0};
+	static long yellpedstate[NUMMOVEMENTS] = {0};
 	static long specialstate[NUMMOVEMENTS] = {0};
 	static long stateconfidence[NUMMOVEMENTS] = {0};
 	static long objectcount[NUMMOVEMENTS] = {0};
@@ -767,6 +769,7 @@ int init_spat(SPAT_t *spatType, unsigned char *spatbuf, int *spatbufsize, sig_pl
 	static long yellTimeToChange[NUMMOVEMENTS] = {0};
         
         int i;
+        int j;
 	timestamp_t ts;
 
 
@@ -825,7 +828,147 @@ int init_spat(SPAT_t *spatType, unsigned char *spatbuf, int *spatbufsize, sig_pl
 //        asn_sequence_add(&spatType->intersections, spatType->intersections.list.array[0]);
 
 //printf("init_spat: Got to 3\n");
+
+#define GREENBALL	0x0001
+#define YELLOWBALL	0x0002
+#define REDBALL		0x0004
+#define DONT_WALK	0x0001
+#define FLASH_DONT_WALK	0x0002
+#define WALK		0x0004
+#define IGNORE_STATE	-1
+
 for(i = 0; i<NUMMOVEMENTS; i++) {
+	j = 1 << i;
+
+        SignalLightState[i] = 0;  //reset the signal state
+	pedstate[i] = 0; 	  //reset the pedestrian state
+
+	if(ca_spat->active_phase & j) {
+		if(j < 4) {
+			switch(ca_spat->interval_A) {
+				case 0x00: //Walk
+        				//Ped state
+					pedstate[i] = WALK;
+					//Next ped state
+					yellpedstate[i] = FLASH_DONT_WALK;
+
+					//Signal state
+        				spatType->intersections.list.array[0]->states.list.array[i]->currState = NULL;
+					//Next signal state
+					spatType->intersections.list.array[0]->states.list.array[i]->yellState = NULL;
+					spatType->intersections.list.array[0]->states.list.array[i]->pedState = &pedstate[i];
+					spatType->intersections.list.array[0]->states.list.array[i]->yellPedState = &yellpedstate[i];
+
+					break;
+				case 0x01: //Don't Walk
+					pedstate[i] = FLASH_DONT_WALK;
+					yellpedstate[i] = DONT_WALK;
+					//Signal state
+        				spatType->intersections.list.array[0]->states.list.array[i]->currState = NULL;
+        				//yellow state - the next state of a motorised lane
+					spatType->intersections.list.array[0]->states.list.array[i]->yellState = NULL;
+
+					spatType->intersections.list.array[0]->states.list.array[i]->pedState = &pedstate[i];
+					spatType->intersections.list.array[0]->states.list.array[i]->yellPedState = &yellpedstate[i];
+					break;
+				case 0x02: //Min Green
+				case 0x04: //Added initial
+				case 0x05: //Passage-resting
+				case 0x06: //Max Gap
+				case 0x07: //Min Gap
+        				//SignalLightState - Motorised lane
+					SignalLightState[i] = GREENBALL;  //Greenball
+					yellstate[i] = YELLOWBALL;
+        				spatType->intersections.list.array[0]->states.list.array[i]->currState = &SignalLightState[i];
+					spatType->intersections.list.array[0]->states.list.array[i]->yellState = &yellstate[i];
+        				spatType->intersections.list.array[0]->states.list.array[i]->pedState = NULL;
+        				spatType->intersections.list.array[0]->states.list.array[i]->yellPedState = NULL;
+					break;
+				case 0x0C: //Max termination
+				case 0x0D: //Gap termination
+        				//SignalLightState - Motorised lane
+					SignalLightState[i] = YELLOWBALL;  //Greenball
+					yellstate[i] = REDBALL;
+        				spatType->intersections.list.array[0]->states.list.array[i]->currState = &SignalLightState[i];
+					spatType->intersections.list.array[0]->states.list.array[i]->yellState = &yellstate[i];
+        				spatType->intersections.list.array[0]->states.list.array[i]->pedState = NULL;
+        				spatType->intersections.list.array[0]->states.list.array[i]->yellPedState = NULL;
+					break;
+				default:
+					SignalLightState[i] = REDBALL;  //Greenball
+					yellstate[i] = GREENBALL;
+        				spatType->intersections.list.array[0]->states.list.array[i]->currState = &SignalLightState[i];
+					spatType->intersections.list.array[0]->states.list.array[i]->yellState = &yellstate[i];
+        				spatType->intersections.list.array[0]->states.list.array[i]->pedState = NULL;
+        				spatType->intersections.list.array[0]->states.list.array[i]->yellPedState = NULL;
+					break;
+			}
+		}
+		else {
+			switch(ca_spat->interval_B) {
+				case 0x00: //Walk
+        				//Ped state
+					pedstate[i] = WALK;
+					//Next ped state
+					yellpedstate[i] = FLASH_DONT_WALK;
+
+					//Signal state
+        				spatType->intersections.list.array[0]->states.list.array[i]->currState = NULL;
+					//Next signal state
+					spatType->intersections.list.array[0]->states.list.array[i]->yellState = NULL;
+					spatType->intersections.list.array[0]->states.list.array[i]->pedState = &pedstate[i];
+					spatType->intersections.list.array[0]->states.list.array[i]->yellPedState = &yellpedstate[i];
+
+					break;
+				case 0x01: //Don't Walk
+					pedstate[i] = FLASH_DONT_WALK;
+					yellpedstate[i] = DONT_WALK;
+					//Signal state
+        				spatType->intersections.list.array[0]->states.list.array[i]->currState = NULL;
+        				//yellow state - the next state of a motorised lane
+					spatType->intersections.list.array[0]->states.list.array[i]->yellState = NULL;
+
+					spatType->intersections.list.array[0]->states.list.array[i]->pedState = &pedstate[i];
+					spatType->intersections.list.array[0]->states.list.array[i]->yellPedState = &yellpedstate[i];
+					break;
+				case 0x02: //Min Green
+				case 0x04: //Added initial
+				case 0x05: //Passage-resting
+				case 0x06: //Max Gap
+				case 0x07: //Min Gap
+        				//SignalLightState - Motorised lane
+					SignalLightState[i] = GREENBALL;  //Greenball
+					yellstate[i] = YELLOWBALL;
+        				spatType->intersections.list.array[0]->states.list.array[i]->currState = &SignalLightState[i];
+					spatType->intersections.list.array[0]->states.list.array[i]->yellState = &yellstate[i];
+        				spatType->intersections.list.array[0]->states.list.array[i]->pedState = NULL;
+        				spatType->intersections.list.array[0]->states.list.array[i]->yellPedState = NULL;
+					break;
+				case 0x0C: //Max termination
+				case 0x0D: //Gap termination
+        				//SignalLightState - Motorised lane
+					SignalLightState[i] = YELLOWBALL;  //Greenball
+					yellstate[i] = REDBALL;
+        				spatType->intersections.list.array[0]->states.list.array[i]->currState = &SignalLightState[i];
+					spatType->intersections.list.array[0]->states.list.array[i]->yellState = &yellstate[i];
+        				spatType->intersections.list.array[0]->states.list.array[i]->pedState = NULL;
+        				spatType->intersections.list.array[0]->states.list.array[i]->yellPedState = NULL;
+					break;
+				default:
+					SignalLightState[i] = REDBALL;  //Greenball
+					yellstate[i] = GREENBALL;
+        				spatType->intersections.list.array[0]->states.list.array[i]->currState = &SignalLightState[i];
+					spatType->intersections.list.array[0]->states.list.array[i]->yellState = &yellstate[i];
+        				spatType->intersections.list.array[0]->states.list.array[i]->pedState = NULL;
+        				spatType->intersections.list.array[0]->states.list.array[i]->yellPedState = NULL;
+					break;
+			}
+		}
+	}
+	else {
+		SignalLightState[i] = REDBALL;  //Greenball
+	}
+
 //printf("init_spat: Got to 4.%d\n", i);
         //MovementState No1.
 	sprintf(movement_name, "Phase %d", i+1);
@@ -834,12 +977,6 @@ for(i = 0; i<NUMMOVEMENTS; i++) {
 	lanecnt[i] = pphase_timing[i]->min_green;
         spatType->intersections.list.array[0]->states.list.array[i]->laneCnt = &lanecnt[i];  //lane count
         ret=OCTET_STRING_fromBuf(&spatType->intersections.list.array[0]->states.list.array[i]->laneSet, laneset, 4);  //lane set
-        //SignalLightState - Motorised lane
-        SignalLightState[i] |= 1<<0;  //Greenball
-        spatType->intersections.list.array[0]->states.list.array[i]->currState = &SignalLightState[i];
-        //Ped state
-        pedstate[i] = 1;   //do not walk
-        spatType->intersections.list.array[0]->states.list.array[i]->pedState = &pedstate[i];
         //Special state
         specialstate[i] = 0;
         spatType->intersections.list.array[0]->states.list.array[i]->specialState = &specialstate[i];
@@ -849,14 +986,6 @@ for(i = 0; i<NUMMOVEMENTS; i++) {
         //state confidence
         stateconfidence[i] = 0;
         spatType->intersections.list.array[0]->states.list.array[i]->stateConfidence = &stateconfidence[i];
-        //yellow stsate - the next state of a motorised lane
-        SignalLightState[i] = 0;  //reset the signal states
-        SignalLightState[i] |= 1<<1;  //Yellowball
-        spatType->intersections.list.array[0]->states.list.array[i]->yellState = &SignalLightState[i];
-        //yellowped state
-        pedstate[i] = 0;
-        pedstate[i] |= 1<<0;   //do not walk
-        spatType->intersections.list.array[0]->states.list.array[i]->yellPedState = &pedstate[i];
         //yellow time to change
         yellTimeToChange[i] = 12001;
         spatType->intersections.list.array[0]->states.list.array[i]->yellTimeToChange = (TimeMark_t *)&yellTimeToChange[i];
@@ -900,8 +1029,8 @@ printf("init_spat: Got to 5 lanecnt %d %d objectcount %d\n", i, lanecnt[i], obje
 
         printf("\n");
 //        printf("Call Decoder...:\n");
-//        rval = ber_decode(0, &asn_DEF_SPAT,(void **)&spatType_decode, spatbuf, spatbufsize);
-//        xer_fprint(stdout, &asn_DEF_SPAT, spatType_decode);
+        rval = ber_decode(0, &asn_DEF_SPAT,(void **)&spatType_decode, spatbuf, spatbufsize);
+        xer_fprint(stdout, &asn_DEF_SPAT, spatType_decode);
 
 
 //        printf("\nmsgID=%d Timetochange=%d\n",spatType_decode->msgID,spatType_decode->intersections.list.array[0]->states.list.array[1]->timeToChange);
