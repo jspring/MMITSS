@@ -16,6 +16,7 @@
  *
  */
 
+#include <termios.h>
 #include "sys_os.h"
 //#include "atsc_clt_vars.h"
 #include "atsc.h"
@@ -1292,84 +1293,88 @@ printf("\n");
 }
 
 int check_and_reconnect_serial(int retval, int *fpin, int *fpout, char *port) {
+        char *portcfg;
+        static int j = 0;
+        int is_usb;
 
-	char *portcfg;
-	static int j = 0;
-	int is_usb;
+        is_usb = strcmp( port, "/dev/ttyUSB") > 0 ? 1 : 0;
 
-	is_usb = strcmp( port, "/dev/ttyUSB") > 0 ? 1 : 0;
+        fprintf(stderr,"check_and_reconnect_serial 1: function return value %d is_usb %d\n", retval, is_usb);
+        switch(retval) {
+                case 0:
+                case -1:
+                case -2:
+                   if(is_usb) {
+                        portcfg = "for x in /dev/ttyUSB*; do /bin/stty -F $x raw 38400;done";
+                        if(retval<0) {
+                                fprintf(stderr,"check_and_reconnect_serial 2: Lost USB connection. Will try to reconnect...\n");
+                        }
+                        else
+                                fprintf(stderr,"check_and_reconnect_serial 3: Opening initial serial connection\n");
+                        if(*fpin != 0)
+                                close(*fpin);
+                        if(*fpout != 0)
+                                close(*fpout);
+                        *fpin = 0;
+                        *fpout = 0;
+                        while(*fpin <= 0) {
+                                sprintf(port, "/dev/ttyUSB%d", (j % 8));
+                                fprintf(stderr,"check_and_reconnect_serial 4: Trying to open %s\n", port);
+                                *fpin = open( port,  O_RDONLY );
+                                if ( *fpin <= 0 ) {
+                                        perror("check_and_reconnect_serial 5: serial inport open");
+                                        fprintf(stderr, "check_and_reconnect_serial 6:Error opening device %s for input\n", port );
+                                        j++;
+                                }
+                                sleep(1);
+                        }
+                        system(portcfg);
+                        *fpout = open( port,  O_WRONLY );
+                        if ( *fpout <= 0 ) {
+                                perror("check_and_reconnect_serial 7: serial outport open");
+                                fprintf(stderr, "check_and_reconnect_serial 8:Error opening device %s for output\n", port );
+                                return -1;
+                        }
+                        break;
+                    }
+                    else {
+                        portcfg = "for x in /dev/ttyS[01]; do /bin/stty -F $x raw 38400;done";
+                        if(retval != 0 ) {
+                                fprintf(stderr,"check_and_reconnect_serial 9: Lost RS232 connection. Will try to reconnect...\n");
+                                close(*fpin);
+                                close(*fpout);
+                        }
+                        else
+                                fprintf(stderr,"check_and_reconnect_serial 10: Initial RS232 connection. Will try to connect...\n");
+                        close(*fpin);
+                        *fpin = -1;
+                        while(*fpin < 0) {
+                                fprintf(stderr,"check_and_reconnect_serial 11: Trying to open %s\n", port);
+                                *fpin = open( port,  O_RDONLY );
+                                sleep(2); //required to make flush work, for some reason
+                                tcflush(*fpin, TCIFLUSH);
+                                if ( *fpin < 0 ) {
+                                        perror("check_and_reconnect_serial 12: serial inport open");
+                                        fprintf(stderr, "check_and_reconnect_serial 13:Error opening device %s for input *fpin %d\n", port, *fpin );
+                                }
+                        }
+                        system(portcfg);
+                        *fpout = open( port,  O_WRONLY );
+                        sleep(2); //required to make flush work, for some reason
+                        tcflush(*fpin, TCOFLUSH);
+                        if ( *fpout <= 0 ) {
+                                perror("check_and_reconnect_serial 6: serial outport open");
+                                fprintf(stderr, "check_and_reconnect_serial 7:Error opening device %s for output\n", port );
+                                return -1;
+                        }
+                        break;
 
-	fprintf(stderr,"check_and_reconnect_serial 1: function return value %d is_usb %d\n", retval, is_usb);
-	switch(retval) {
-		case 0:
-		case -1:
-		case -2:
-		   if(is_usb) {
-			portcfg = "for x in /dev/ttyUSB*; do /bin/stty -F $x raw 38400;done";
-			if(retval<0) {
-				fprintf(stderr,"check_and_reconnect_serial 2: Lost USB connection. Will try to reconnect...\n");
-			}
-			else
-				fprintf(stderr,"check_and_reconnect_serial 2: Opening initial serial connection\n");
-			if(*fpin != 0)
-				close(*fpin);
-			if(*fpout != 0)
-				close(*fpout);
-			*fpin = 0;
-			*fpout = 0;
-			while(*fpin <= 0) {
-				fprintf(stderr,"check_and_reconnect 3: Trying to open %s\n", port);
-				*fpin = open( port,  O_RDONLY );
-				if ( *fpin <= 0 ) {
-					perror("check_and_reconnect_serial 4: serial inport open");
-					fprintf(stderr, "check_and_reconnect_serial 5:Error opening device %s for input\n", port );
-				}
-				sleep(1);
-			}
-			system(portcfg);
-			*fpout = open( port,  O_WRONLY );
-			if ( *fpout <= 0 ) {
-				perror("check_and_reconnect_serial 6: serial outport open");
-				fprintf(stderr, "check_and_reconnect_serial 7:Error opening device %s for output\n", port );
-				return -1;
-			}
-			break;
-		    }
-		    else {
-			portcfg = "for x in /dev/ttyS[01]; do /bin/stty -F $x raw 38400;done";
-			if(retval != 0 ) {
-				fprintf(stderr,"check_and_reconnect_serial 2: Lost RS232 connection. Will try to reconnect...\n");
-				close(*fpin);
-				close(*fpout);
-			}
-			else
-				fprintf(stderr,"check_and_reconnect_serial 2: Initial RS232 connection. Will try to connect...\n");
-			*fpin = 0;
-			while(*fpin <= 0) {
-				fprintf(stderr,"check_and_reconnect 3: Trying to open %s\n", port);
-				*fpin = open( port,  O_RDONLY );
-				j++;
-				if ( *fpin <= 0 ) {
-					perror("check_and_reconnect_serial 4: serial inport open");
-					fprintf(stderr, "check_and_reconnect_serial 5:Error opening device %s for input\n", port );
-				}
-				sleep(1);
-			}
-			system(portcfg);
-			*fpout = open( port,  O_WRONLY );
-			if ( *fpout <= 0 ) {
-				perror("check_and_reconnect_serial 6: serial outport open");
-				fprintf(stderr, "check_and_reconnect_serial 7:Error opening device %s for output\n", port );
-				return -1;
-			}
-			break;
-
-		    }
-		default:
-			printf("check_and_reconnect_serial 8: default case\n");
-			return -2;
-	}
-	return 0;
+                    }
+                default:
+                        printf("check_and_reconnect_serial 8: default case\n");
+                        return -2;
+        }
+        return 0;
 }
 
 int get_mem(unsigned short lomem, unsigned short num_bytes, int wait_for_data, gen_mess_typ *readBuff, int fpin, int fpout, char verbose) {
@@ -1530,8 +1535,6 @@ readBuff->data[5] = 0xff;
 
 #define FREE	255
 #define FLASH	254
-#define max(x, y)	((x) > (y) ? (x) : (y))
-#define min(x, y)	((x) < (y) ? (x) : (y))
 #define RED	0
 #define YELLOW	1
 #define GREEN	2
