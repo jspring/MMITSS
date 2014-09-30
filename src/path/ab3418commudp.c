@@ -40,7 +40,7 @@ int OpenTCPIPConnection(char *controllerIP, unsigned short port);
 int process_phase_status( get_long_status8_resp_mess_typ *pstatus, int verbose, unsigned char greens, phase_status_t *pphase_status);
 int init_spat(SPAT_t *spatType, unsigned char *spatbuf, int *spatbufsize, sig_plan_msg_t *sig_plan_msg, raw_signal_status_msg_t *raw_signal_status_msg, phase_timing_t *pphase_timing[], get_long_status8_resp_mess_typ *long_status8, plan_params_t *pplan_params[], int verbose);
 
-#define NUMMOVEMENTS	2
+#define NUMMOVEMENTS	8
 
 int main(int argc, char *argv[]) {
 
@@ -65,7 +65,7 @@ int main(int argc, char *argv[]) {
 
 	SPAT_t *spatType;
         IntersectionState_t *this_intersection;
-	SPAT_t *spatType_decode;
+        SPAT_t * spatType_decode=0;
 	MovementState_t movestate[NUMMOVEMENTS];
 	unsigned char spatbuf[1000];
 	int spatbufsize;
@@ -75,8 +75,8 @@ int main(int argc, char *argv[]) {
 	db_timing_get_2070_t db_timing_get_2070;
 	int retval;
 	int check_retval;
-	char ab3418_port[20] = "/dev/ttyS0";
-	char ca_spat_port[20] = "/dev/ttyS1";
+	char ca_spat_port[20] = "/dev/ttyS0";
+	char ab3418_port[20] = "/dev/ttyS1";
 	char strbuf[300];
 	struct sockaddr_storage datamgr_addr;
 
@@ -96,8 +96,10 @@ int main(int argc, char *argv[]) {
 	unsigned char no_control = 0;
 //	unsigned char no_control_sav = 0;
 //	char detector = 0;
-	unsigned int temp_addr;
-	short temp_port;
+	char *ip_str = NULL;
+	short temp_port = 51013;
+	struct sockaddr_in dest_addr;
+	socklen_t addrlen = sizeof(struct sockaddr);
 //	int rem;
 //	unsigned char new_phase_assignment;	
 	unsigned char output_spat_binary = 0;
@@ -115,15 +117,7 @@ int main(int argc, char *argv[]) {
 	unsigned char curr_plan_num = 255;
 	unsigned char curr_plan_num_sav = 255;
 
-        spatType = (SPAT_t *) calloc(1, sizeof(SPAT_t));
-        spatType_decode = (SPAT_t *) calloc(1, sizeof(SPAT_t));
-        this_intersection = (IntersectionState_t *) calloc(1, sizeof(IntersectionState_t));
-        asn_sequence_add(&spatType->intersections, this_intersection);
-	for(i=0; i<NUMMOVEMENTS ; i++) {
-        	asn_sequence_add(&spatType->intersections.list.array[0]->states, &movestate[i]);
-	}
- 
-        while ((opt = getopt(argc, argv, "A:S:vi:na:bo:s:l:h:z")) != -1)
+        while ((opt = getopt(argc, argv, "A:S:vi:na:bo:s:l:h:u:p:z")) != -1)
         {
                 switch (opt)
                 {
@@ -153,6 +147,12 @@ int main(int argc, char *argv[]) {
                   case 'h':
                         high_battelle = atoi(optarg);
                         break;
+                  case 'u':
+                        ip_str = strdup(optarg);
+                        break;
+                  case 'p':
+                        temp_port = atoi(optarg);
+                        break;
 		  case 'z':
 		  default:
 			fprintf(stderr, "Usage: %s -A <AB3418 port, (def. /dev/ttyS0)> -S <CA SPaT port, (def. /dev/ttyS1)> -v (verbose) -b (output binary SPaT message) -s <UDP unicast destination (def. 127.0.0.1)> -o <UDP unicast port> -l <lowest Battelle byte to display> -h <highest Battelle byte to display>\n", argv[0]);
@@ -169,6 +169,15 @@ int main(int argc, char *argv[]) {
 			high_battelle = ((low_battelle + 16) > sizeof(battelle_spat_t)) ? sizeof(battelle_spat_t): low_battelle + 16;
 	}
 
+	//Allocate memory for J2735 SPaT 
+        spatType = (SPAT_t *) calloc(1, sizeof(SPAT_t));
+        spatType_decode = (SPAT_t *) calloc(1, sizeof(SPAT_t));
+        this_intersection = (IntersectionState_t *) calloc(1, sizeof(IntersectionState_t));
+        asn_sequence_add(&spatType->intersections, this_intersection);
+	for(i=0; i<NUMMOVEMENTS ; i++) {
+        	asn_sequence_add(&spatType->intersections.list.array[0]->states, &movestate[i]);
+	}
+ 
 	// Clear message structs
 	memset(&db_timing_set_2070, 0, sizeof(db_timing_set_2070));
 	memset(&raw_signal_status_msg, 0, sizeof(raw_signal_status_msg));
@@ -179,9 +188,14 @@ int main(int argc, char *argv[]) {
 	for(i=0; i<MAX_PLANS+1; i++) 
 		pplan_params[i] = &plan_params[i];
 
-	datamgr_out = OpenTCPIPConnection("localhost", (unsigned short)TRAF_CTL_IFACE_OUTPORT);
-	if(datamgr_out >= 0)
-		datamgr_in = datamgr_out;
+	if(ip_str != NULL) {
+		datamgr_out = udp_unicast_init(&dest_addr, ip_str, temp_port);
+	}
+	else {
+		datamgr_out = OpenTCPIPConnection("localhost", (unsigned short)TRAF_CTL_IFACE_OUTPORT);
+		if(datamgr_out >= 0)
+			datamgr_in = datamgr_out;
+	}
         /* Initialize serial port. */
 	check_retval = check_and_reconnect_serial(0, &ab3418_fdin, &ab3418_fdout, ab3418_port);
 	check_retval = check_and_reconnect_serial(0, &ca_spat_fdin, &ca_spat_fdout, ca_spat_port);
@@ -280,19 +294,19 @@ while(1) {
 		memset(spatbuf, 0, sizeof(spatbuf));
 		spatbufsize = 0;
 		init_spat(spatType, spatbuf, &spatbufsize, &sig_plan_msg, &raw_signal_status_msg, pphase_timing, &long_status8, pplan_params, verbose);
+        printf("ab3418commudp: Call Decoder...:\n");
+        ber_decode(0, &asn_DEF_SPAT,(void **)&spatType_decode, spatbuf, spatbufsize);
+        xer_fprint(stdout, &asn_DEF_SPAT, spatType_decode);
+printf("<currState> interval A %d B %d spatbufsize %d\n", raw_signal_status_msg.interval_A, raw_signal_status_msg.interval_B, spatbufsize);
 printf("ab3418commudp: Got to 2 spatbufsize %d sizeof(spatbuf) %d\n", spatbufsize, sizeof(spatbuf));
                	 printf("spatbuf:\n");
         	for(i=0;i < spatbufsize; i++)
                	 printf("#%d %x\t", i, (uint8_t) spatbuf[i]);
                	 printf("\n");
-//        printf("Call Decoder...:\n");
-//        ber_decode(0, &asn_DEF_SPAT,(void **)&spatType_decode, spatbuf, spatbufsize);
-//        xer_fprint(stdout, &asn_DEF_SPAT, spatType_decode);
-//		exit(EXIT_SUCCESS);
 
 //		retval = build_spat(&sig_plan_msg, &raw_signal_status_msg, pphase_timing, &long_status8, pplan_params, &battelle_spat, verbose);
-		snd_addr.sin_port = temp_port;
-		snd_addr.sin_addr.s_addr = temp_addr;
+//		snd_addr.sin_port = temp_port;
+//		snd_addr.sin_addr.s_addr = dest_addr;
 if(verbose) {                                           
         printf("ab3418commudp print spatbuf:\n");
         for(j=0; j<spatbufsize; j+=10){             
@@ -378,7 +392,9 @@ if(verbose) {
 			}
 
 		}
-	    bytes_sent = write(datamgr_out, &spatbuf, spatbufsize);
+//	    bytes_sent = write(datamgr_out, &spatbuf, spatbufsize);
+	    bytes_sent = sendto(datamgr_out, &spatbuf, spatbufsize, 0, (struct sockaddr *)&dest_addr, addrlen);
+
 //exit(EXIT_SUCCESS);
 	}
 	if( (datamgr_in >=0) && (FD_ISSET(datamgr_in, &readfds)) ) {
@@ -772,21 +788,7 @@ int init_spat(SPAT_t *spatType, unsigned char *spatbuf, int *spatbufsize, sig_pl
         int j;
 	timestamp_t ts;
 
-
-
-//        SPAT_t * spatType=0;
-
         SPAT_t * spatType_decode=0;
-
-
-//        IntersectionState_t * this_intersection = 0;
-//        MovementState_t *MoveState[NUMMOVEMENTS] = {NULL};
-
-//printf("init_spat: Got to 1\n");
-//	for(i = 0; i < NUMMOVEMENTS; i++)
-//        	MoveState[i] = (MovementState_t *) calloc( 1, sizeof(MovementState_t));
-//        this_intersection = (IntersectionState_t *) calloc(1, sizeof(IntersectionState_t));
-//        spatType = (SPAT_t *) calloc(1, sizeof(SPAT_t));
         spatType_decode = (SPAT_t *) calloc(1, sizeof(SPAT_t));
 
 	//Define SPAT_t members
@@ -824,10 +826,6 @@ int init_spat(SPAT_t *spatType, unsigned char *spatbuf, int *spatbufsize, sig_pl
 
 	//Define SPAT_t->IntersectionState_t members
         //Sequence of IntersectionState (there's only one intersection per MRP)
-//printf("init_spat: Got to 2\n");
-//        asn_sequence_add(&spatType->intersections, spatType->intersections.list.array[0]);
-
-//printf("init_spat: Got to 3\n");
 
 #define GREENBALL	0x0001
 #define YELLOWBALL	0x0002
@@ -966,10 +964,10 @@ for(i = 0; i<NUMMOVEMENTS; i++) {
 		}
 	}
 	else {
-		SignalLightState[i] = REDBALL;  //Greenball
+		SignalLightState[i] = REDBALL;
+        	spatType->intersections.list.array[0]->states.list.array[i]->currState = &SignalLightState[i];
 	}
 
-//printf("init_spat: Got to 4.%d\n", i);
         //MovementState No1.
 	sprintf(movement_name, "Phase %d", i+1);
         spatType->intersections.list.array[0]->states.list.array[i]->movementName =
@@ -1002,40 +1000,27 @@ for(i = 0; i<NUMMOVEMENTS; i++) {
         objectcount[i] += 1;
         spatType->intersections.list.array[0]->states.list.array[i]->pedCount=&objectcount[i];
 
-//        asn_sequence_add(&spatType->intersections.list.array[0]->states, spatType->intersections.list.array[0]->states.list.array[i]);
-printf("init_spat: Got to 5 lanecnt %d %d objectcount %d\n", i, lanecnt[i], objectcount[i]);
 }
-//    printf("init_spat: Got to 6 Call Encoder...\n");
         ec = der_encode_to_buffer(&asn_DEF_SPAT, spatType, spatbuf, 1000);
 
 	if(spatbuf[1] == 0x82) {
 		*spatbufsize = (spatbuf[2] << 8) + spatbuf[3] + 4;
-		printf("init_spat: Got to 7 spatbufsize %d %u\n", *spatbufsize, *spatbufsize);
+//		printf("init_spat: Got to 7 spatbufsize %d %u\n", *spatbufsize, *spatbufsize);
 	}
 	else {
 		if(spatbuf[1] == 0x81) {
 			*spatbufsize = spatbuf[2] + 3;
-			printf("init_spat: Got to 8 spatbufsize %d %u\n", *spatbufsize, *spatbufsize);
+//			printf("init_spat: Got to 8 spatbufsize %d %u\n", *spatbufsize, *spatbufsize);
 		}
 		else {
 			*spatbufsize = spatbuf[1] + 2;
-			printf("init_spat: Got to 9 spatbufsize %d %u\n", *spatbufsize, *spatbufsize);
+//			printf("init_spat: Got to 9 spatbufsize %d %u\n", *spatbufsize, *spatbufsize);
 		}
 	}
 
-//        printf("init_spat: Got to 10 Buffer after encoding: spatbufsize %d spatbuf[1] %#hhx spatbuf[2] %#hhx spatbuf[3] %#hhx \n", *spatbufsize, spatbuf[1], spatbuf[2], spatbuf[3]);
-//        for(i=0;i < *spatbufsize; i++)
-//                printf("#%d %x\t", i, (uint8_t) spatbuf[i]);
+//        printf("get_spat: Call Decoder...:\n");
+//        rval = ber_decode(0, &asn_DEF_SPAT,(void **)&spatType_decode, spatbuf, *spatbufsize);
+//        xer_fprint(stdout, &asn_DEF_SPAT, spatType_decode);
 
-        printf("\n");
-//        printf("Call Decoder...:\n");
-        rval = ber_decode(0, &asn_DEF_SPAT,(void **)&spatType_decode, spatbuf, spatbufsize);
-        xer_fprint(stdout, &asn_DEF_SPAT, spatType_decode);
-
-
-//        printf("\nmsgID=%d Timetochange=%d\n",spatType_decode->msgID,spatType_decode->intersections.list.array[0]->states.list.array[1]->timeToChange);
-
-//        getchar();
-//free(spatType);
-		return 0;
+	return 0;
 }
