@@ -6,8 +6,8 @@
 
 SERVER_LIB = $(OBJDIR)/libserver_lib.a
 SERVER_LIB_OBJS = $(OBJDIR)/server_lib.o
-AZ_INC_DIR = /home/jspring/mmitss/source/Utilities/SPATendecoder/Win32Project1/Win32Project1
-AZ_LD_DIR = /home/jspring/mmitss/source/Utilities/SPATendecoder/Win32Project1/Win32Project1/module.asn1-1
+AZ_INC_DIR = /home/mmitss/source/Utilities/SPATendecoder/Win32Project1/Win32Project1
+AZ_LD_DIR = /home/mmitss/source/Utilities/SPATendecoder/Win32Project1/Win32Project1/module.asn1-1
 
 PATH_LIBS = -lserver_lib -ldl -lrt
 PATH_LDFLAGS += -L./lnx -L$(AZ_LD_DIR)
