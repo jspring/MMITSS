@@ -38,7 +38,7 @@ static int sig_list[] =
 
 int OpenTCPIPConnection(char *controllerIP, unsigned short port);
 int process_phase_status( get_long_status8_resp_mess_typ *pstatus, int verbose, unsigned char greens, phase_status_t *pphase_status);
-int init_spat(SPAT_t *spatType, unsigned char *spatbuf, int *spatbufsize, sig_plan_msg_t *sig_plan_msg, raw_signal_status_msg_t *raw_signal_status_msg, phase_timing_t *pphase_timing[], get_long_status8_resp_mess_typ *long_status8, plan_params_t *pplan_params[], int verbose);
+int init_spat(SPAT_t *spatType, unsigned char *spatbuf, int *spatmsgsize, sig_plan_msg_t *sig_plan_msg, raw_signal_status_msg_t *raw_signal_status_msg, phase_timing_t *pphase_timing[], get_long_status8_resp_mess_typ *long_status8, plan_params_t *pplan_params[], int verbose);
 
 #define NUMMOVEMENTS	8
 
@@ -51,6 +51,7 @@ int main(int argc, char *argv[]) {
 	int ab3418_fdout = -1;
 	int ca_spat_fdin = -1;
 	int ca_spat_fdout = -1;
+	int do_ab3418 = 1;
 	char datamgr_readbuff[60];
 	int len;
 	int wait_for_data = 1;
@@ -68,7 +69,7 @@ int main(int argc, char *argv[]) {
         SPAT_t * spatType_decode=0;
 	MovementState_t movestate[NUMMOVEMENTS];
 	unsigned char spatbuf[1000];
-	int spatbufsize;
+	int spatmsgsize;
 
 	mschedule_t mschedule;
 	db_timing_set_2070_t db_timing_set_2070;
@@ -91,8 +92,8 @@ int main(int argc, char *argv[]) {
 //        struct tm time_converted;
 	int opt;
 	int verbose = 0;
-	int low_battelle = -1;
-	int high_battelle = -1;
+	int low_spat = -1;
+	int high_spat = -1;
 	unsigned char no_control = 0;
 //	unsigned char no_control_sav = 0;
 //	char detector = 0;
@@ -117,7 +118,7 @@ int main(int argc, char *argv[]) {
 	unsigned char curr_plan_num = 255;
 	unsigned char curr_plan_num_sav = 255;
 
-        while ((opt = getopt(argc, argv, "A:S:vi:na:bo:s:l:h:u:p:z")) != -1)
+        while ((opt = getopt(argc, argv, "A:S:v:na:beo:s:z")) != -1)
         {
                 switch (opt)
                 {
@@ -141,16 +142,19 @@ int main(int argc, char *argv[]) {
                   case 'b':
                         output_spat_binary = 1;
                         break;
+                  case 'e':
+                        do_ab3418 = 0;
+                        break;
                   case 'l':
-                        low_battelle = atoi(optarg);
+                        low_spat = atoi(optarg);
                         break;
                   case 'h':
-                        high_battelle = atoi(optarg);
+                        high_spat = atoi(optarg);
                         break;
-                  case 'u':
+                  case 's':
                         ip_str = strdup(optarg);
                         break;
-                  case 'p':
+                  case 'o':
                         temp_port = atoi(optarg);
                         break;
 		  case 'z':
@@ -160,13 +164,13 @@ int main(int argc, char *argv[]) {
 		}
 	}
 
-	if(low_battelle >= 0) {
-		if( (low_battelle > sizeof(battelle_spat_t)) || (high_battelle > sizeof(battelle_spat_t)) ) {
-			fprintf(stderr, "Battelle bytes must be in the range 0-%d. Exiting....\n", sizeof(battelle_spat_t));
+	if(low_spat >= 0) {
+		if( (low_spat > sizeof(spatbuf)) || (high_spat > sizeof(spatbuf)) ) {
+			fprintf(stderr, "Battelle bytes must be in the range 0-%d. Exiting....\n", sizeof(spatbuf));
 			exit(EXIT_FAILURE);
 		}
-		if(high_battelle < low_battelle)
-			high_battelle = ((low_battelle + 16) > sizeof(battelle_spat_t)) ? sizeof(battelle_spat_t): low_battelle + 16;
+		if(high_spat < low_spat)
+			high_spat = ((low_spat + 16) > sizeof(spatbuf)) ? sizeof(spatbuf): low_spat + 16;
 	}
 
 	//Allocate memory for J2735 SPaT 
@@ -197,7 +201,8 @@ int main(int argc, char *argv[]) {
 			datamgr_in = datamgr_out;
 	}
         /* Initialize serial port. */
-	check_retval = check_and_reconnect_serial(0, &ab3418_fdin, &ab3418_fdout, ab3418_port);
+	if(do_ab3418)
+		check_retval = check_and_reconnect_serial(0, &ab3418_fdin, &ab3418_fdout, ab3418_port);
 	check_retval = check_and_reconnect_serial(0, &ca_spat_fdin, &ca_spat_fdout, ca_spat_port);
 
 
@@ -216,8 +221,9 @@ int main(int argc, char *argv[]) {
 		}
 
 
-	printf("main 1: getting timing settings before infinite loop\n");
-	for(i=0; i<MAX_PHASES; i++) {
+	if(do_ab3418){
+	    printf("main 1: getting timing settings before infinite loop\n");
+	    for(i=0; i<MAX_PHASES; i++) {
 		db_timing_get_2070.phase = i+1;	
 		db_timing_get_2070.page = 0x100; //phase timing page	
 		retval = get_timing(&db_timing_get_2070, wait_for_data, &phase_timing[i], &ab3418_fdin, &ab3418_fdout, verbose);
@@ -226,10 +232,12 @@ int main(int argc, char *argv[]) {
 			retval = get_timing(&db_timing_get_2070, wait_for_data, &phase_timing[i], 
 				&ab3418_fdin, &ab3418_fdout, verbose);
 		}
+	    }
 	}
 
-	printf("main 2: getting coordination plan settings before infinite loop\n");
-	for(i=1; i<=MAX_PLANS; i++) {
+	if(do_ab3418){
+	    printf("main 2: getting coordination plan settings before infinite loop\n");
+	    for(i=1; i<=MAX_PLANS; i++) {
 		retval = get_coord_params(&plan_params[i], i, wait_for_data, &ab3418_fdout, &ab3418_fdin, verbose);
 		if(retval < 0) {
 			printf("get_coord_params returned %d for plan %d\n",
@@ -238,6 +246,7 @@ int main(int argc, char *argv[]) {
 			);
 			exit(EXIT_FAILURE);
 		}
+	    }
 	}
 
 	//Zero out saved fds
@@ -252,13 +261,15 @@ int main(int argc, char *argv[]) {
 		maxfd = (datamgr_out > maxfd) ? datamgr_out : maxfd;
 	}
 
-	if(ab3418_fdin >= 0){
+	if(do_ab3418){
+	    if(ab3418_fdin >= 0){
 		FD_SET(ab3418_fdin, &readfds_sav);
 		maxfd = (ab3418_fdin > maxfd) ? ab3418_fdin : maxfd;
-	}
-	if(ab3418_fdout >= 0){
+	    }
+	    if(ab3418_fdout >= 0){
 		FD_SET(ab3418_fdout, &writefds_sav);
 		maxfd = (ab3418_fdout > maxfd) ? ab3418_fdout : maxfd;
+	    }
 	}
 	if(ca_spat_fdin >= 0){
 		FD_SET(ca_spat_fdin, &readfds_sav);
@@ -287,29 +298,28 @@ while(1) {
 	}
 
 	if(FD_ISSET(ca_spat_fdin, &readfds)) {
-		retval = get_status(wait_for_data, &readBuff, ab3418_fdin, ab3418_fdout, verbose);
+		if(do_ab3418){
+			retval = get_status(wait_for_data, &readBuff, ab3418_fdin, ab3418_fdout, verbose);
+		}
 		retval = get_spat(wait_for_data, &raw_signal_status_msg, ca_spat_fdin, verbose, output_spat_binary);
 		memcpy(&long_status8, &readBuff, sizeof(get_long_status8_resp_mess_typ));
 //printf("ab3418commudp: Got to 1\n");
 		memset(spatbuf, 0, sizeof(spatbuf));
-		spatbufsize = 0;
-		init_spat(spatType, spatbuf, &spatbufsize, &sig_plan_msg, &raw_signal_status_msg, pphase_timing, &long_status8, pplan_params, verbose);
-        printf("ab3418commudp: Call Decoder...:\n");
-        ber_decode(0, &asn_DEF_SPAT,(void **)&spatType_decode, spatbuf, spatbufsize);
-        xer_fprint(stdout, &asn_DEF_SPAT, spatType_decode);
-printf("<currState> interval A %d B %d spatbufsize %d\n", raw_signal_status_msg.interval_A, raw_signal_status_msg.interval_B, spatbufsize);
-printf("ab3418commudp: Got to 2 spatbufsize %d sizeof(spatbuf) %d\n", spatbufsize, sizeof(spatbuf));
+		spatmsgsize = 0;
+		init_spat(spatType, spatbuf, &spatmsgsize, &sig_plan_msg, &raw_signal_status_msg, pphase_timing, &long_status8, pplan_params, verbose);
+//        printf("ab3418commudp: Call Decoder...:\n");
+//        ber_decode(0, &asn_DEF_SPAT,(void **)&spatType_decode, spatbuf, spatmsgsize);
+//        xer_fprint(stdout, &asn_DEF_SPAT, spatType_decode);
+printf("<currState> interval A %d B %d spatmsgsize %d\n", raw_signal_status_msg.interval_A, raw_signal_status_msg.interval_B, spatmsgsize);
+printf("ab3418commudp: Got to 2 spatmsgsize %d sizeof(spatbuf) %d\n", spatmsgsize, sizeof(spatbuf));
                	 printf("spatbuf:\n");
-        	for(i=0;i < spatbufsize; i++)
+        	for(i=0;i < spatmsgsize; i++)
                	 printf("#%d %x\t", i, (uint8_t) spatbuf[i]);
                	 printf("\n");
 
-//		retval = build_spat(&sig_plan_msg, &raw_signal_status_msg, pphase_timing, &long_status8, pplan_params, &battelle_spat, verbose);
-//		snd_addr.sin_port = temp_port;
-//		snd_addr.sin_addr.s_addr = dest_addr;
 if(verbose) {                                           
         printf("ab3418commudp print spatbuf:\n");
-        for(j=0; j<spatbufsize; j+=10){             
+        for(j=0; j<spatmsgsize; j+=10){             
                 printf("%d: ", j);                                  
                 for(i=0; i<10; i++)                                 
                         printf("%hhx ", spatbuf[j+i]);           
@@ -317,17 +327,18 @@ if(verbose) {
         }                                                       
 }                                                       
 
-		if(low_battelle >= 0) {
+		if(low_spat >= 0) {
 			printf("ab3418udp:Battelle Spat: ");
-			for(i=low_battelle; i <= high_battelle; i++)
+			for(i=low_spat; i <= high_spat; i++)
 				printf("#%d %#hhx ", i, spatbuf[i]);
 			printf("\n");
 		}
-		if(long_status8.pattern < 252) 
+		if(do_ab3418){
+		    if(long_status8.pattern < 252) 
 			curr_plan_num = (long_status8.pattern / 3) + 1;
-		else
+		    else
 			curr_plan_num = 0;
-		if(curr_plan_num != curr_plan_num_sav) {
+		    if(curr_plan_num != curr_plan_num_sav) {
 			printf("Changing plan number from %d to %d long_status8.pattern %d\n", curr_plan_num_sav, curr_plan_num, long_status8.pattern);
 			curr_plan_num_sav = curr_plan_num;
 //			if(long_status8.pattern < 252) 
@@ -391,13 +402,15 @@ if(verbose) {
 				}
 			}
 
+		    }
 		}
-//	    bytes_sent = write(datamgr_out, &spatbuf, spatbufsize);
-	    bytes_sent = sendto(datamgr_out, &spatbuf, spatbufsize, 0, (struct sockaddr *)&dest_addr, addrlen);
+//	    bytes_sent = write(datamgr_out, &spatbuf, spatmsgsize);
+	    bytes_sent = sendto(datamgr_out, &spatbuf, spatmsgsize, 0, (struct sockaddr *)&dest_addr, addrlen);
 
 //exit(EXIT_SUCCESS);
 	}
-	if( (datamgr_in >=0) && (FD_ISSET(datamgr_in, &readfds)) ) {
+	if(do_ab3418){
+	    if( (datamgr_in >=0) && (FD_ISSET(datamgr_in, &readfds)) ) {
 		memset(datamgr_readbuff, 0, sizeof(datamgr_readbuff));
 		if( (retval = recvfrom(datamgr_in, datamgr_readbuff, sizeof(datamgr_readbuff), 0,
 			(struct sockaddr *)&datamgr_addr, (socklen_t *)&len)) > 0) {
@@ -423,10 +436,11 @@ no_control = 0;
 						ab3418_fdout, ab3418_fdin, verbose);
 			}
 		}
+	    }
 	}
 
 	if(output_spat_binary) {
-		bytes_sent = sendto(datamgr_out, &spatbuf, spatbufsize, 0,
+		bytes_sent = sendto(datamgr_out, &spatbuf, spatmsgsize, 0,
 			(struct sockaddr *) &snd_addr, sizeof(snd_addr));
 	}
 //	else {
@@ -756,7 +770,7 @@ printf("\n");
 }
 */
 
-int init_spat(SPAT_t *spatType, unsigned char *spatbuf, int *spatbufsize, sig_plan_msg_t *sig_plan_msg, raw_signal_status_msg_t *ca_spat, phase_timing_t *pphase_timing[], get_long_status8_resp_mess_typ *long_status8, plan_params_t *pplan_params[], int verbose) {
+int init_spat(SPAT_t *spatType, unsigned char *spatbuf, int *spatmsgsize, sig_plan_msg_t *sig_plan_msg, raw_signal_status_msg_t *ca_spat, phase_timing_t *pphase_timing[], get_long_status8_resp_mess_typ *long_status8, plan_params_t *pplan_params[], int verbose) {
         
 
 	int ret;
@@ -831,7 +845,7 @@ int init_spat(SPAT_t *spatType, unsigned char *spatbuf, int *spatbufsize, sig_pl
 #define YELLOWBALL	0x0002
 #define REDBALL		0x0004
 #define DONT_WALK	0x0001
-#define FLASH_DONT_WALK	0x0002
+#define FLASH_DONOT_WALK	0x0002
 #define WALK		0x0004
 #define IGNORE_STATE	-1
 
@@ -848,7 +862,7 @@ for(i = 0; i<NUMMOVEMENTS; i++) {
         				//Ped state
 					pedstate[i] = WALK;
 					//Next ped state
-					yellpedstate[i] = FLASH_DONT_WALK;
+					yellpedstate[i] = FLASH_DONOT_WALK;
 
 					//Signal state
         				spatType->intersections.list.array[0]->states.list.array[i]->currState = NULL;
@@ -859,7 +873,7 @@ for(i = 0; i<NUMMOVEMENTS; i++) {
 
 					break;
 				case 0x01: //Don't Walk
-					pedstate[i] = FLASH_DONT_WALK;
+					pedstate[i] = FLASH_DONOT_WALK;
 					yellpedstate[i] = DONT_WALK;
 					//Signal state
         				spatType->intersections.list.array[0]->states.list.array[i]->currState = NULL;
@@ -908,7 +922,7 @@ for(i = 0; i<NUMMOVEMENTS; i++) {
         				//Ped state
 					pedstate[i] = WALK;
 					//Next ped state
-					yellpedstate[i] = FLASH_DONT_WALK;
+					yellpedstate[i] = FLASH_DONOT_WALK;
 
 					//Signal state
         				spatType->intersections.list.array[0]->states.list.array[i]->currState = NULL;
@@ -919,7 +933,7 @@ for(i = 0; i<NUMMOVEMENTS; i++) {
 
 					break;
 				case 0x01: //Don't Walk
-					pedstate[i] = FLASH_DONT_WALK;
+					pedstate[i] = FLASH_DONOT_WALK;
 					yellpedstate[i] = DONT_WALK;
 					//Signal state
         				spatType->intersections.list.array[0]->states.list.array[i]->currState = NULL;
@@ -1003,24 +1017,21 @@ for(i = 0; i<NUMMOVEMENTS; i++) {
 }
         ec = der_encode_to_buffer(&asn_DEF_SPAT, spatType, spatbuf, 1000);
 
-	if(spatbuf[1] == 0x82) {
-		*spatbufsize = (spatbuf[2] << 8) + spatbuf[3] + 4;
-//		printf("init_spat: Got to 7 spatbufsize %d %u\n", *spatbufsize, *spatbufsize);
+	switch(spatbuf[1]) {
+		case 0x82:
+			*spatmsgsize = (spatbuf[2] << 8) + spatbuf[3] + 4;
+			break;
+		case 0x81:
+			*spatmsgsize = spatbuf[2] + 3;
+			break;
+		default:
+			*spatmsgsize = spatbuf[1] + 2;
+			break;
 	}
-	else {
-		if(spatbuf[1] == 0x81) {
-			*spatbufsize = spatbuf[2] + 3;
-//			printf("init_spat: Got to 8 spatbufsize %d %u\n", *spatbufsize, *spatbufsize);
-		}
-		else {
-			*spatbufsize = spatbuf[1] + 2;
-//			printf("init_spat: Got to 9 spatbufsize %d %u\n", *spatbufsize, *spatbufsize);
-		}
+	if(verbose) {
+		printf("get_spat: Call Decoder...:\n");
+		rval = ber_decode(0, &asn_DEF_SPAT,(void **)&spatType_decode, spatbuf, *spatmsgsize);
+		xer_fprint(stdout, &asn_DEF_SPAT, spatType_decode);
 	}
-
-//        printf("get_spat: Call Decoder...:\n");
-//        rval = ber_decode(0, &asn_DEF_SPAT,(void **)&spatType_decode, spatbuf, *spatbufsize);
-//        xer_fprint(stdout, &asn_DEF_SPAT, spatType_decode);
-
 	return 0;
 }
