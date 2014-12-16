@@ -55,7 +55,7 @@ int spat2battelle(raw_signal_status_msg_t *ca_spat, battelle_spat_t *battelle_sp
 int get_coord_params(plan_params_t *plan_params, int plan_num, int wait_for_data, int *fpout, int *fpin, char verbose);
 int set_coord_params(plan_params_t *plan_params, int plan_num, mschedule_t *mschedule, int wait_for_data, int fdout, int fdin, char verbose);
 int build_sigplanmsg(sig_plan_msg_t *sig_plan_msg, phase_timing_t *phase_timing[], plan_params_t *current_plan_params,get_long_status8_resp_mess_typ *long_status8, int verbose);
-
+int get_phase_flags(phase_flags_t *phase_flags, int wait_for_data, int *fpout, int *fpin, char verbose);
 
 char *timing_strings[] = {
         "Walk_1",
@@ -700,6 +700,89 @@ int get_timing(db_timing_get_2070_t *db_timing_get_2070, int wait_for_data, phas
 	return 0;
 }
 
+#define PAGE2_FLAGS_DATA			2
+#define PAGE2_BLOCK1_PHASE_FLAGS_DATA		1
+#define PAGE2_BLOCK2_SPECIAL_FLAGS_DATA		2
+#define PAGE2_BLOCK3_PED_FLAGS_DATA		3
+#define PAGE2_BLOCK4_OVERLAP_FLAGS_DATA		4
+
+#define PAGE3_PHASE_TIMING_DATA			3
+#define PAGE3_BLOCK9_OVERLAP_TIMING_DATA	9
+
+#define PAGE4_COORD_PLAN_TIMING			4
+
+int get_phase_flags(phase_flags_t *phase_flags, int wait_for_data, int *fpout, int *fpin, char verbose) {
+
+        fd_set readfds;
+        int selectval = 1000;
+        struct timeval timeout;
+        char *inportisset = "not yet initialized";
+        char *outportisset = "not yet initialized";
+	int ser_driver_retval;
+	get_controller_timing_data_request_t get_controller_timing_data_request_mess;
+	gen_mess_typ readBuff;
+	int retval;
+	int i;
+
+	if( (retval = get_request( 0x87, PAGE2_FLAGS_DATA, PAGE2_BLOCK1_PHASE_FLAGS_DATA, *fpout, verbose)) < 0) {
+		printf("get_phase_flags 1: get_request returned %d\n", retval);
+		return -1;
+	}
+
+	if(wait_for_data) {
+		FD_ZERO(&readfds);
+		FD_SET(*fpin, &readfds);
+		timeout.tv_sec = 1;
+		timeout.tv_usec = 0;
+		if( (selectval = select(*fpin+1, &readfds, NULL, NULL, &timeout)) <=0) {
+		    if(errno != EINTR) {
+			perror("select 9");
+			inportisset = (FD_ISSET(*fpin, &readfds)) == 0 ? "no" : "yes";
+			printf("get_coord_params 2: *fpin %d selectval %d inportisset %s\n", *fpin, selectval, inportisset);
+			return -2;
+		    }
+		}
+		ser_driver_retval = ser_driver_read(&readBuff, *fpin, verbose);
+		if(ser_driver_retval == 0) {
+			printf("get_coord_params 3: Lost serial connection\n");
+			return -3;
+		}
+		else {
+			memcpy(phase_flags, &readBuff.data[7], sizeof(phase_flags_t));
+
+			if(verbose) 
+			{
+				printf("permitted_phases	%#hhx\n", phase_flags-> permitted_phases);;
+				printf("restricted_phases	%#hhx\n", phase_flags->restricted_phases );;
+				printf("veh_min_recall	%#hhx\n", phase_flags->veh_min_recall );;
+				printf("veh_max_recall	%#hhx\n", phase_flags->veh_max_recall );;
+				printf("ped_recall	%#hhx\n", phase_flags->ped_recall );;
+				printf("bicycle_recall	%#hhx\n", phase_flags->bicycle_recall );;
+				printf("red_detector_lock	%#hhx\n", phase_flags->red_detector_lock );;
+				printf("yellow_detector_lock	%#hhx\n", phase_flags->yellow_detector_lock );;
+				printf("force_max_lock	%#hhx\n", phase_flags->force_max_lock );
+				printf("double_entry	%#hhx\n", phase_flags->double_entry );
+				printf("rest_in_walk	%#hhx\n", phase_flags->rest_in_walk );
+				printf("rest_in_red	%#hhx\n", phase_flags->rest_in_red );
+				printf("walk_2	%#hhx\n", phase_flags->walk_2 );
+				printf("max_green_2	%#hhx\n", phase_flags->max_green_2 );
+				printf("max_green_3	%#hhx\n", phase_flags->max_green_3 );
+				printf("startup_first_phases_green	%#hhx\n", phase_flags->startup_first_phases_green );
+				printf("startup_yellow_phases	%#hhx\n", phase_flags->startup_yellow_phases );
+				printf("startup_veh_calls	%#hhx\n", phase_flags->startup_veh_calls );
+				printf("startup_ped_calls	%#hhx\n", phase_flags->startup_ped_calls );
+				printf("startup_yellow_overlaps	%#hhx\n", phase_flags->startup_yellow_overlaps );
+				printf("startup_all_red_time	%#hhx\n", phase_flags->startup_all_red_time );
+			}
+		}
+	}
+	if(verbose) 
+		printf("get_phase_flags 6-end: *fpin %d selectval %d inportisset %s *fpout %d selectval %d outportisset %s ser_driver_retval %d get_controller_timing_data_request_mess.offset %hx\n", *fpin, selectval, inportisset, *fpout, selectval, outportisset, ser_driver_retval, get_controller_timing_data_request_mess.offset);
+
+	return 0;
+}
+
+
 int get_coord_params(plan_params_t *plan_params, int plan_num, int wait_for_data, int *fpout, int *fpin, char verbose) {
 
         fd_set readfds;
@@ -713,7 +796,7 @@ int get_coord_params(plan_params_t *plan_params, int plan_num, int wait_for_data
 	int retval;
 	int i;
 
-	if( (retval = get_request( 0x87, 4, plan_num, *fpout, verbose)) < 0) {
+	if( (retval = get_request( 0x87, PAGE4_COORD_PLAN_TIMING, plan_num, *fpout, verbose)) < 0) {
 		printf("get_coord_params 1: get_request returned %d\n", retval);
 		return -1;
 	}
@@ -1569,7 +1652,7 @@ int build_spat(sig_plan_msg_t *sig_plan_msg, raw_signal_status_msg_t *ca_spat, p
 	unsigned char phase_sequence[MAX_PHASES];
 	unsigned char *offset_str[] = {"A", "B", "C"};
 	static unsigned char msg_count = 0;
-	unsigned char	*pbattelle_spat = battelle_spat;
+	unsigned char	*pbattelle_spat = (unsigned char)battelle_spat;
 	SPAT_t SPAT;
 
 	memset(sig_plan_msg, 0, sizeof(sig_plan_msg_t));
@@ -1642,9 +1725,6 @@ printf("build_spat: pattern %d curr_plan_num %d offset %s ca_spat->plan_num %d\n
 		Min_Green[i] = (ca_spat->veh_call & j) ? (phase_timing[i]->add_per_veh/10 + phase_timing[i]->min_green) : 0;
 
 		if(ca_spat->active_phase & j) { //Active phase calculations
-			battelle_spat->movement[i].obj_id = 0x04;
-			battelle_spat->movement[i].lane_set.obj_id = 0x05;
-
 			if(interval == 0x07) {
 				if(reduce_gap_start_time[i] != 0)
 					battelle_spat->movement[i].min_time_remaining.mintimeremaining = 
@@ -1794,6 +1874,12 @@ printf("timer for movement %d %d interval %hhx plan %hhu\n", i+1, battelle_spat-
 	}
 //printf("start_index_phaseA %hhu active_phaseA %hhu start_index_phaseB %hhu active_phaseB %hhu ", start_index_phaseA, active_phaseA, start_index_phaseB, active_phaseB);
 //printf("\n");
+
+
+
+
+
+
 
 //printf("Time to next phase ");
 	//Determine time_to_next_phase for all phases
