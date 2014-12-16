@@ -92,6 +92,30 @@ typedef struct {
 } IS_PACKED phase_timing_t; 
 
 typedef struct {
+	unsigned char permitted_phases; 	//Byte 7
+	unsigned char restricted_phases;
+	unsigned char veh_min_recall;
+	unsigned char veh_max_recall;
+	unsigned char ped_recall;
+	unsigned char bicycle_recall;
+	unsigned char red_detector_lock;
+	unsigned char yellow_detector_lock;
+	unsigned char force_max_lock;
+	unsigned char double_entry;
+	unsigned char rest_in_walk;
+	unsigned char rest_in_red;
+	unsigned char walk_2;
+	unsigned char max_green_2;
+	unsigned char max_green_3;
+	unsigned char startup_first_phases_green;
+	unsigned char startup_yellow_phases;
+	unsigned char startup_veh_calls;
+	unsigned char startup_ped_calls;
+	unsigned char startup_yellow_overlaps;
+	unsigned char startup_all_red_time;	//Byte 27
+} IS_PACKED phase_flags_t; 
+
+typedef struct {
 	unsigned char plan_num; //aka block ID in TSMSS message
 	unsigned char cycle_length;
 	unsigned char green_factor[8];
