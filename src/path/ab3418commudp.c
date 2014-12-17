@@ -8,6 +8,7 @@
 #include "ab3418commudp.h"
 #include <udp_utils.h>
 #include "local.h"
+#include <malloc.h>
 
 #include "mmitss_ports_and_message_numbers.h"
 
@@ -38,7 +39,7 @@ static int sig_list[] =
 
 int OpenTCPIPConnection(char *controllerIP, unsigned short port);
 int process_phase_status( get_long_status8_resp_mess_typ *pstatus, int verbose, unsigned char greens, phase_status_t *pphase_status);
-int init_spat(SPAT_t *spatType, unsigned char *spatbuf, int *spatmsgsize, sig_plan_msg_t *sig_plan_msg, raw_signal_status_msg_t *raw_signal_status_msg, phase_timing_t *pphase_timing[], get_long_status8_resp_mess_typ *long_status8, plan_params_t *pplan_params[], int verbose);
+int init_spat(SPAT_t *spatType, unsigned char *spatbuf, int *spatmsgsize, sig_plan_msg_t *sig_plan_msg, raw_signal_status_msg_t *raw_signal_status_msg, phase_timing_t *pphase_timing[], get_long_status8_resp_mess_typ *long_status8, plan_params_t *pplan_params[], phase_flags_t *phase_flags, int verbose);
 
 #define NUMMOVEMENTS	8
 
@@ -63,6 +64,7 @@ int main(int argc, char *argv[]) {
 	raw_signal_status_msg_t raw_signal_status_msg;
 	plan_params_t plan_params[MAX_PLANS + 1]; //Plan[0]=Free, Plan[10]=Saved plan
 	plan_params_t *pplan_params[MAX_PLANS + 1];
+	phase_flags_t phase_flags;
 
 	SPAT_t *spatType;
         IntersectionState_t *this_intersection;
@@ -92,6 +94,8 @@ int main(int argc, char *argv[]) {
 //        struct tm time_converted;
 	int opt;
 	int verbose = 0;
+	int veryverbose = 0;
+	int veryveryverbose = 0;
 	int low_spat = -1;
 	int high_spat = -1;
 	unsigned char no_control = 0;
@@ -118,7 +122,7 @@ int main(int argc, char *argv[]) {
 	unsigned char curr_plan_num = 255;
 	unsigned char curr_plan_num_sav = 255;
 
-        while ((opt = getopt(argc, argv, "A:S:v:na:beo:s:z")) != -1)
+        while ((opt = getopt(argc, argv, "A:S:v::na:beo:s:z")) != -1)
         {
                 switch (opt)
                 {
@@ -132,6 +136,14 @@ int main(int argc, char *argv[]) {
                         break;
                   case 'v':
                         verbose = 1;
+			if(optarg) {
+			if( strcmp(optarg, "v") >= 0) 
+				veryverbose = 1;
+			if( strcmp(optarg, "v") > 0) 
+				veryveryverbose = 1;
+			}
+			printf("verbose %d veryverbose %d veryveryverbose %d\n",
+			verbose, veryverbose, veryveryverbose);
                         break;
                   case 'n':
                         no_control = 1;
@@ -181,12 +193,18 @@ int main(int argc, char *argv[]) {
 	for(i=0; i<NUMMOVEMENTS ; i++) {
         	asn_sequence_add(&spatType->intersections.list.array[0]->states, &movestate[i]);
 	}
+
  
 	// Clear message structs
 	memset(&db_timing_set_2070, 0, sizeof(db_timing_set_2070));
 	memset(&raw_signal_status_msg, 0, sizeof(raw_signal_status_msg));
 	memset(&snd_addr, 0, sizeof(snd_addr));
+
 	memset(spatbuf, 0, sizeof(spatbuf));
+	spatbuf[0] = 0xFF;
+	spatbuf[1] = 0xFF;
+	spatbuf[2] = 13;
+
 	for(i=0; i<MAX_PHASES; i++) 
 		pphase_timing[i] = &phase_timing[i];
 	for(i=0; i<MAX_PLANS+1; i++) 
@@ -197,8 +215,7 @@ int main(int argc, char *argv[]) {
 	}
 	else {
 		datamgr_out = OpenTCPIPConnection("localhost", (unsigned short)TRAF_CTL_IFACE_OUTPORT);
-		if(datamgr_out >= 0)
-			datamgr_in = datamgr_out;
+		datamgr_in = OpenTCPIPConnection("localhost", (unsigned short)TRAF_CTL_IFACE_INPORT);
 	}
         /* Initialize serial port. */
 	if(do_ab3418)
@@ -247,6 +264,17 @@ int main(int argc, char *argv[]) {
 			exit(EXIT_FAILURE);
 		}
 	    }
+	}
+
+	if(do_ab3418){
+	    printf("main 3: getting phase flags before infinite loop\n");
+	    retval = get_phase_flags(&phase_flags, wait_for_data, &ab3418_fdout, &ab3418_fdin, verbose);
+		if(retval < 0) {
+			printf("get_phase_flags returned %d\n",
+				retval
+			);
+			exit(EXIT_FAILURE);
+		}
 	}
 
 	//Zero out saved fds
@@ -304,28 +332,25 @@ while(1) {
 		retval = get_spat(wait_for_data, &raw_signal_status_msg, ca_spat_fdin, verbose, output_spat_binary);
 		memcpy(&long_status8, &readBuff, sizeof(get_long_status8_resp_mess_typ));
 //printf("ab3418commudp: Got to 1\n");
-		memset(spatbuf, 0, sizeof(spatbuf));
+                memset(&spatbuf[7], 0, sizeof(spatbuf)-7);
 		spatmsgsize = 0;
-		init_spat(spatType, spatbuf, &spatmsgsize, &sig_plan_msg, &raw_signal_status_msg, pphase_timing, &long_status8, pplan_params, verbose);
-//        printf("ab3418commudp: Call Decoder...:\n");
-//        ber_decode(0, &asn_DEF_SPAT,(void **)&spatType_decode, spatbuf, spatmsgsize);
-//        xer_fprint(stdout, &asn_DEF_SPAT, spatType_decode);
-printf("<currState> interval A %d B %d spatmsgsize %d\n", raw_signal_status_msg.interval_A, raw_signal_status_msg.interval_B, spatmsgsize);
-printf("ab3418commudp: Got to 2 spatmsgsize %d sizeof(spatbuf) %d\n", spatmsgsize, sizeof(spatbuf));
-               	 printf("spatbuf:\n");
-        	for(i=0;i < spatmsgsize; i++)
-               	 printf("#%d %x\t", i, (uint8_t) spatbuf[i]);
-               	 printf("\n");
+		init_spat(spatType, spatbuf, &spatmsgsize, &sig_plan_msg, &raw_signal_status_msg, pphase_timing, &long_status8, pplan_params, &phase_flags, verbose);
+		spatmsgsize += 7; //7 bytes accounts for the MMITSS header (0xFFFF + msgID + timestamp)
 
-if(verbose) {                                           
-        printf("ab3418commudp print spatbuf:\n");
-        for(j=0; j<spatmsgsize; j+=10){             
-                printf("%d: ", j);                                  
-                for(i=0; i<10; i++)                                 
-                        printf("%hhx ", spatbuf[j+i]);           
-                printf("\n");
-        }                                                       
-}                                                       
+	if(veryverbose) {                                           
+		printf("ab3418commudp: Call Decoder...:\n");
+		spatType_decode = 0;
+		ber_decode(0, &asn_DEF_SPAT,(void **)&spatType_decode, spatbuf, spatmsgsize);
+		xer_fprint(stdout, &asn_DEF_SPAT, spatType_decode);
+		printf("<currState> interval A %d B %d spatmsgsize %d\n", raw_signal_status_msg.interval_A, raw_signal_status_msg.interval_B, spatmsgsize);
+		printf("ab3418commudp print spatbuf:\n");
+		for(j=0; j<spatmsgsize; j+=10){             
+			printf("%d: ", j);                                  
+			for(i=0; i<10; i++)                                 
+				printf("%hhx ", spatbuf[j+i]);           
+				printf("\n");
+			}                                                       
+	}                                                       
 
 		if(low_spat >= 0) {
 			printf("ab3418udp:Battelle Spat: ");
@@ -370,7 +395,7 @@ if(verbose) {
 			    bytes_sent = write(datamgr_out, &sig_plan_msg, sizeof(sig_plan_msg_t));
 			else {
 				datamgr_out = OpenTCPIPConnection("localhost", (unsigned short)TRAF_CTL_IFACE_OUTPORT);
-				datamgr_in = datamgr_out;
+				datamgr_in = OpenTCPIPConnection("localhost", (unsigned short)TRAF_CTL_IFACE_INPORT);
 
 				//Zero out saved fds
 				FD_ZERO(&readfds_sav);
@@ -770,7 +795,7 @@ printf("\n");
 }
 */
 
-int init_spat(SPAT_t *spatType, unsigned char *spatbuf, int *spatmsgsize, sig_plan_msg_t *sig_plan_msg, raw_signal_status_msg_t *ca_spat, phase_timing_t *pphase_timing[], get_long_status8_resp_mess_typ *long_status8, plan_params_t *pplan_params[], int verbose) {
+int init_spat(SPAT_t *spatType, unsigned char *spatbuf, int *spatmsgsize, sig_plan_msg_t *sig_plan_msg, raw_signal_status_msg_t *ca_spat, phase_timing_t *phase_timing[], get_long_status8_resp_mess_typ *long_status8, plan_params_t *pplan_params[], phase_flags_t *phase_flags, int verbose) {
         
 
 	int ret;
@@ -784,6 +809,23 @@ int init_spat(SPAT_t *spatType, unsigned char *spatbuf, int *spatmsgsize, sig_pl
 	char intersection_id[2]={0x12, 0x34};
 	char intersection_status;
 	char laneset[4] = {1, 2, 3, 4};
+
+	unsigned char active_phaseA;
+	unsigned char active_phaseB;
+	unsigned char start_index_phaseA;
+	unsigned char start_index_phaseB;
+	unsigned char curr_plan_num;
+	unsigned char phase_sequence[MAX_PHASES];
+	unsigned char phase_sequence_rev[MAX_PHASES];
+	unsigned char interval_multiplier[] = {1,1,10,1,10,10,10,10,1,1,1,1,1,1,1,1};
+	unsigned char Max_Green[8];
+	unsigned char Min_Green[8];
+	unsigned char countdown_timer;
+	static int reduce_gap_start_time[MAX_PHASES] = {0,0,0,0,0,0,0,0};
+
+
+
+	unsigned char interval;
 	int tstemp;
 	static long movementcnt = NUMMOVEMENTS;
 	static long lanecnt[NUMMOVEMENTS] = {0};
@@ -800,6 +842,8 @@ int init_spat(SPAT_t *spatType, unsigned char *spatbuf, int *spatmsgsize, sig_pl
         
         int i;
         int j;
+        int k;
+        int index;
 	timestamp_t ts;
 
         SPAT_t * spatType_decode=0;
@@ -841,9 +885,142 @@ int init_spat(SPAT_t *spatType, unsigned char *spatbuf, int *spatmsgsize, sig_pl
 	//Define SPAT_t->IntersectionState_t members
         //Sequence of IntersectionState (there's only one intersection per MRP)
 
+
+	if( (long_status8->pattern < 252) && (long_status8->pattern > 0) )
+		curr_plan_num = ((long_status8->pattern - 1) / 3) + 1;
+	else
+		curr_plan_num = 0;
+
+        //Determine phase sequence in pairs.
+        for(i=0, index=0; i < 5; index+=4,i+=2) {
+                //if i is a lag phase, then i+1 must be a leading phase, and vice versa
+                j = 1 << i;
+                if( !(j & pplan_params[curr_plan_num]->lag_phases) ) {
+			//i is a LEADING phase
+                        phase_sequence[index] = i;
+                        phase_sequence[index+2] = i+1;
+		}
+		else {
+			//i is a LAGGING phase
+                        phase_sequence[index] = i+1;
+                        phase_sequence[index+2] = i;
+		}
+                j = 1 << i+4;
+                if( !(j & pplan_params[curr_plan_num]->lag_phases) ) {
+			//i+4 is a LEADING phase
+                        phase_sequence[index+1] = i+4;
+                        phase_sequence[index+3] = i+5;
+		}
+		else {
+			//i is a LAGGING phase
+                        phase_sequence[index+1] = i+5;
+                        phase_sequence[index+3] = i+4;
+		}
+	}
+
+printf("Phase sequence ");
+for(i=0; i<8; i++) 
+	phase_sequence_rev[phase_sequence[i]] = i;
+for(i=0; i<8; i++) 
+    printf("%d %d ", 1+phase_sequence[i], phase_sequence_rev[phase_sequence[i]]);
+printf("lag phases %#hhx plan num %d\n", pplan_params[curr_plan_num]->lag_phases, curr_plan_num);
+
+            for(i=0; i<NUMMOVEMENTS; i++) {
+                j = 1 << i;
+
+
+                interval = (i<4) ? ca_spat->interval_A : ca_spat->interval_B;
+
+		//Pick out the appropriate maximum green value (1, 2, or 3)
+                Max_Green[i] = phase_timing[i]->max_green1;
+                Max_Green[i] = (phase_flags->max_green_2 & j) ? phase_timing[i]->max_green2 : Max_Green[i];
+                Max_Green[i] = (phase_flags->max_green_3 & j) ? phase_timing[i]->max_green3 : Max_Green[i];
+
+//                Max_Green[i] = (ca_spat->veh_call & j) ? (Max_Green[i] + phase_timing[i]->min_green) : 0;
+
+                Min_Green[i] = (ca_spat->veh_call & j) ? (phase_timing[i]->add_per_veh/10 + phase_timing[i]->min_green) : 0;
+
+                if(ca_spat->active_phase & j) { //Active phase calculations
+                        if(interval == 0x07) {
+                                if(reduce_gap_start_time[i] != 0)
+                                        timeToChange[i]= 
+//						(10 * phase_timing[i]->max_green1) - ((tstemp - reduce_gap_start_time[i])/100);
+						(10 * Max_Green[i]) - ((tstemp - reduce_gap_start_time[i])/100);
+                                else {
+                                        timeToChange[i]= 
+						10 * Max_Green[i];
+//						10 * phase_timing[i]->max_green1;
+                                        reduce_gap_start_time[i] = tstemp;
+                                }
+                        }
+                        else {
+                                countdown_timer = (i<4) ? ca_spat->intvA_timer : ca_spat->intvB_timer;
+                                timeToChange[i] = interval_multiplier[interval] * countdown_timer;
+                                reduce_gap_start_time[i] = 0;
+                        }
+printf("timer for movement %d %ld interval %hhx plan %hhu\n", i+1, timeToChange[i], interval, curr_plan_num);
+
+                        Max_Green[i] = timeToChange[i];
+                        Min_Green[i] = timeToChange[i];
+                        if(verbose) {
+                                printf("\n\nPhase %d min_time_remaining %ld intrvl %#hhx veh_call %#hhx ped_call %#hhx\n\n",
+                                        i+1,
+                                        timeToChange[i]*interval_multiplier[interval],
+                                        interval,
+                                        ca_spat->veh_call,
+                                        ca_spat->ped_call
+                                );
+                                printf("active phase: timeToChange[%d] %f interval %#hhx\n", i+1, timeToChange[i]/10.0, interval);
+			}
+                }
+
+                else {
+                        timeToChange[i] =
+
+                                ( (10*max(Max_Green[(i+1)%4], Max_Green[(i+1)%8])) +
+                                max(phase_timing[(i+1)%4]->yellow, phase_timing[(i+1)%8]->yellow) +
+                                max(phase_timing[(i+1)%4]->all_red, phase_timing[(i+1)%8]->all_red) +
+
+                                (10*max(Max_Green[(i+2)%4], Max_Green[(i+2)%8])) +
+                                max(phase_timing[(i+2)%4]->yellow, phase_timing[(i+2)%8]->yellow) +
+                                max(phase_timing[(i+2)%4]->all_red, phase_timing[(i+2)%8]->all_red) +
+
+                                (10*max(Max_Green[(i+3)%4], Max_Green[(i+3)%8])) +
+                                max(phase_timing[(i+3)%4]->yellow, phase_timing[(i+3)%8]->yellow) +
+                                max(phase_timing[(i+3)%4]->all_red, phase_timing[(i+3)%8]->all_red) )/10;
+
+                        if(verbose) {
+//                                printf("inactive phase: timeToChange[%d] %ld\n", i+1, timeToChange[i]);
+                        }
+                }
+	}
+printf("Phase sequence Got to 1\n");
+
+//Now, let's determine the entire trailing sequence of the current active phases
+        for(i=0; i < NUMMOVEMENTS/2; i++) {
+                j = 1 << i;
+
+printf("Phase sequence Got to 2 i %d\n", i);
+		if(ca_spat->active_phase & j) { //Active phase calculations
+			start_index_phaseA = phase_sequence_rev[i];
+printf("Phase sequence Got to 3 j %hhx start_index %d\n", j, start_index_phaseA);
+			printf("Phase sequence after current active phase (low barrier group): %d ", i+1);
+			for(k = 1; ((start_index_phaseA + k) % 8) != start_index_phaseA; k++)
+				printf("%d ", 1+phase_sequence[( (start_index_phaseA + k) % 8) ]);	
+			printf("\n");
+			break;
+                }
+        }
+
+printf("start_index_phaseA %hhu active_phaseA %hhu start_index_phaseB %hhu active_phaseB %hhu ", start_index_phaseA, active_phaseA, start_index_phaseB, active_phaseB);
+printf("\n");
+
 #define GREENBALL	0x0001
 #define YELLOWBALL	0x0002
 #define REDBALL		0x0004
+#define GREENLEFTARROW	0x0010
+#define YELLOWLEFTARROW	0x0020
+#define REDLEFTARROW	0x0040
 #define DONT_WALK	0x0001
 #define FLASH_DONOT_WALK	0x0002
 #define WALK		0x0004
@@ -856,8 +1033,8 @@ for(i = 0; i<NUMMOVEMENTS; i++) {
 	pedstate[i] = 0; 	  //reset the pedestrian state
 
 	if(ca_spat->active_phase & j) {
-		if(j < 4) {
-			switch(ca_spat->interval_A) {
+		interval = (i < 4) ? ca_spat->interval_A : ca_spat->interval_B;
+		switch(interval) {
 				case 0x00: //Walk
         				//Ped state
 					pedstate[i] = WALK;
@@ -889,8 +1066,8 @@ for(i = 0; i<NUMMOVEMENTS; i++) {
 				case 0x06: //Max Gap
 				case 0x07: //Min Gap
         				//SignalLightState - Motorised lane
-					SignalLightState[i] = GREENBALL;  //Greenball
-					yellstate[i] = YELLOWBALL;
+					SignalLightState[i] = (i % 2) ? GREENBALL : GREENLEFTARROW;  //Greenball
+					yellstate[i] = (i % 2) ? YELLOWBALL : YELLOWLEFTARROW;
         				spatType->intersections.list.array[0]->states.list.array[i]->currState = &SignalLightState[i];
 					spatType->intersections.list.array[0]->states.list.array[i]->yellState = &yellstate[i];
         				spatType->intersections.list.array[0]->states.list.array[i]->pedState = NULL;
@@ -898,102 +1075,46 @@ for(i = 0; i<NUMMOVEMENTS; i++) {
 					break;
 				case 0x0C: //Max termination
 				case 0x0D: //Gap termination
+				case 0x0E: //Yellow force-off
         				//SignalLightState - Motorised lane
-					SignalLightState[i] = YELLOWBALL;  //Greenball
-					yellstate[i] = REDBALL;
+					SignalLightState[i] = (i % 2) ? YELLOWBALL : YELLOWLEFTARROW;
+					yellstate[i] = (i % 2) ? REDBALL : REDLEFTARROW;
         				spatType->intersections.list.array[0]->states.list.array[i]->currState = &SignalLightState[i];
 					spatType->intersections.list.array[0]->states.list.array[i]->yellState = &yellstate[i];
         				spatType->intersections.list.array[0]->states.list.array[i]->pedState = NULL;
         				spatType->intersections.list.array[0]->states.list.array[i]->yellPedState = NULL;
 					break;
 				default:
-					SignalLightState[i] = REDBALL;  //Greenball
-					yellstate[i] = GREENBALL;
+					SignalLightState[i] = (i % 2) ? REDBALL : REDLEFTARROW;
+					yellstate[i] = (i % 2) ? GREENBALL : GREENLEFTARROW;  //Greenball
         				spatType->intersections.list.array[0]->states.list.array[i]->currState = &SignalLightState[i];
 					spatType->intersections.list.array[0]->states.list.array[i]->yellState = &yellstate[i];
         				spatType->intersections.list.array[0]->states.list.array[i]->pedState = NULL;
         				spatType->intersections.list.array[0]->states.list.array[i]->yellPedState = NULL;
 					break;
 			}
-		}
-		else {
-			switch(ca_spat->interval_B) {
-				case 0x00: //Walk
-        				//Ped state
-					pedstate[i] = WALK;
-					//Next ped state
-					yellpedstate[i] = FLASH_DONOT_WALK;
-
-					//Signal state
-        				spatType->intersections.list.array[0]->states.list.array[i]->currState = NULL;
-					//Next signal state
-					spatType->intersections.list.array[0]->states.list.array[i]->yellState = NULL;
-					spatType->intersections.list.array[0]->states.list.array[i]->pedState = &pedstate[i];
-					spatType->intersections.list.array[0]->states.list.array[i]->yellPedState = &yellpedstate[i];
-
-					break;
-				case 0x01: //Don't Walk
-					pedstate[i] = FLASH_DONOT_WALK;
-					yellpedstate[i] = DONT_WALK;
-					//Signal state
-        				spatType->intersections.list.array[0]->states.list.array[i]->currState = NULL;
-        				//yellow state - the next state of a motorised lane
-					spatType->intersections.list.array[0]->states.list.array[i]->yellState = NULL;
-
-					spatType->intersections.list.array[0]->states.list.array[i]->pedState = &pedstate[i];
-					spatType->intersections.list.array[0]->states.list.array[i]->yellPedState = &yellpedstate[i];
-					break;
-				case 0x02: //Min Green
-				case 0x04: //Added initial
-				case 0x05: //Passage-resting
-				case 0x06: //Max Gap
-				case 0x07: //Min Gap
-        				//SignalLightState - Motorised lane
-					SignalLightState[i] = GREENBALL;  //Greenball
-					yellstate[i] = YELLOWBALL;
-        				spatType->intersections.list.array[0]->states.list.array[i]->currState = &SignalLightState[i];
-					spatType->intersections.list.array[0]->states.list.array[i]->yellState = &yellstate[i];
-        				spatType->intersections.list.array[0]->states.list.array[i]->pedState = NULL;
-        				spatType->intersections.list.array[0]->states.list.array[i]->yellPedState = NULL;
-					break;
-				case 0x0C: //Max termination
-				case 0x0D: //Gap termination
-        				//SignalLightState - Motorised lane
-					SignalLightState[i] = YELLOWBALL;  //Greenball
-					yellstate[i] = REDBALL;
-        				spatType->intersections.list.array[0]->states.list.array[i]->currState = &SignalLightState[i];
-					spatType->intersections.list.array[0]->states.list.array[i]->yellState = &yellstate[i];
-        				spatType->intersections.list.array[0]->states.list.array[i]->pedState = NULL;
-        				spatType->intersections.list.array[0]->states.list.array[i]->yellPedState = NULL;
-					break;
-				default:
-					SignalLightState[i] = REDBALL;  //Greenball
-					yellstate[i] = GREENBALL;
-        				spatType->intersections.list.array[0]->states.list.array[i]->currState = &SignalLightState[i];
-					spatType->intersections.list.array[0]->states.list.array[i]->yellState = &yellstate[i];
-        				spatType->intersections.list.array[0]->states.list.array[i]->pedState = NULL;
-        				spatType->intersections.list.array[0]->states.list.array[i]->yellPedState = NULL;
-					break;
-			}
-		}
 	}
 	else {
-		SignalLightState[i] = REDBALL;
+		SignalLightState[i] = (i % 2) ? REDBALL : REDLEFTARROW;
+		yellstate[i] = (i % 2) ? GREENBALL : GREENLEFTARROW;  //Greenball
         	spatType->intersections.list.array[0]->states.list.array[i]->currState = &SignalLightState[i];
+		spatType->intersections.list.array[0]->states.list.array[i]->yellState = &yellstate[i];
+        	spatType->intersections.list.array[0]->states.list.array[i]->pedState = NULL;
+        	spatType->intersections.list.array[0]->states.list.array[i]->yellPedState = NULL;
 	}
 
         //MovementState No1.
 	sprintf(movement_name, "Phase %d", i+1);
         spatType->intersections.list.array[0]->states.list.array[i]->movementName =
 		OCTET_STRING_new_fromBuf(&asn_DEF_OCTET_STRING, movement_name, -1);  //movementName
-	lanecnt[i] = pphase_timing[i]->min_green;
+	lanecnt[i] = phase_timing[i]->min_green;
         spatType->intersections.list.array[0]->states.list.array[i]->laneCnt = &lanecnt[i];  //lane count
         ret=OCTET_STRING_fromBuf(&spatType->intersections.list.array[0]->states.list.array[i]->laneSet, laneset, 4);  //lane set
         //Special state
         specialstate[i] = 0;
         spatType->intersections.list.array[0]->states.list.array[i]->specialState = &specialstate[i];
         //time to change
-        timeToChange[i] = 200;
+//        timeToChange[i] = 200;
         spatType->intersections.list.array[0]->states.list.array[i]->timeToChange = timeToChange[i];
         //state confidence
         stateconfidence[i] = 0;
@@ -1028,10 +1149,10 @@ for(i = 0; i<NUMMOVEMENTS; i++) {
 			*spatmsgsize = spatbuf[1] + 2;
 			break;
 	}
-	if(verbose) {
-		printf("get_spat: Call Decoder...:\n");
-		rval = ber_decode(0, &asn_DEF_SPAT,(void **)&spatType_decode, spatbuf, *spatmsgsize);
-		xer_fprint(stdout, &asn_DEF_SPAT, spatType_decode);
-	}
+//	if(verbose) {
+//		printf("get_spat: Call Decoder...:\n");
+//		rval = ber_decode(0, &asn_DEF_SPAT,(void **)&spatType_decode, spatbuf, *spatmsgsize);
+//		xer_fprint(stdout, &asn_DEF_SPAT, spatType_decode);
+//	}
 	return 0;
 }
