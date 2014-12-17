@@ -445,7 +445,7 @@ typedef union
 	get_controller_timing_data_response_t get_controller_timing_data_response_mess;
 	overlap_msg_t			overlap_msg;
 	get_short_status_request_t	get_short_status_resp;
-	detector_msg_t			detector_msg_t;
+	detector_msg_t			detector_msg;
 
 } IS_PACKED mess_union_typ;
 
@@ -467,6 +467,7 @@ int *SetMasterTrafficResponsive(void);
 
 
 //long msg_struct_ptr_00; 		//0x00
+/*
 long msg_struct_ptr_01; 		//0x01
 long msg_struct_ptr_02; 		//0x02
 long msg_struct_ptr_03; 		//0x03
@@ -610,7 +611,7 @@ long msg_struct_ptr_8C; 		//0x8C
 long msg_struct_ptr_8D; 		//0x8D
 long msg_struct_ptr_8E; 		//0x8E
 long msg_struct_ptr_8F; 		//0x8F
-
+*/
 typedef struct{
 	int	size;
 	void	*struct_ptr;
