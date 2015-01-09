@@ -19,7 +19,8 @@ PATH_OBJS = $(OBJDIR)/timestamp.o \
 
 OBJDIR = lnx
 
-EXEC = $(OBJDIR)/data_manager $(OBJDIR)/server $(OBJDIR)/client $(OBJDIR)/ab3418commudp
+EXEC = $(OBJDIR)/data_manager $(OBJDIR)/server $(OBJDIR)/client $(OBJDIR)/ab3418commudp $(OBJDIR)/sim_spat
+
 
 all: $(OBJDIR) $(SERVER_LIB) $(PATH_OBJS) $(EXEC) 
 
