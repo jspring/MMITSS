@@ -53,6 +53,7 @@ int main(int argc, char *argv[]) {
 	int ca_spat_fdin = -1;
 	int ca_spat_fdout = -1;
 	int do_ab3418 = 1;
+	int do_ca_spat = 1;
 	char datamgr_readbuff[60];
 	int len;
 	int wait_for_data = 1;
@@ -122,7 +123,7 @@ int main(int argc, char *argv[]) {
 	unsigned char curr_plan_num = 255;
 	unsigned char curr_plan_num_sav = 255;
 
-        while ((opt = getopt(argc, argv, "A:S:v::na:beo:s:z")) != -1)
+        while ((opt = getopt(argc, argv, "A:S:v::na:beo:s:xz")) != -1)
         {
                 switch (opt)
                 {
@@ -169,9 +170,15 @@ int main(int argc, char *argv[]) {
                   case 'o':
                         temp_port = atoi(optarg);
                         break;
+                  case 'x':
+                        do_ab3418 = 0;
+                        do_ca_spat = 0;
+			ca_spat_fdin = STDIN_FILENO;
+			ca_spat_fdout = STDOUT_FILENO;
+                        break;
 		  case 'z':
 		  default:
-			fprintf(stderr, "Usage: %s -A <AB3418 port, (def. /dev/ttyS0)> -S <CA SPaT port, (def. /dev/ttyS1)> -v (verbose) -b (output binary SPaT message) -s <UDP unicast destination (def. 127.0.0.1)> -o <UDP unicast port> -l <lowest Battelle byte to display> -h <highest Battelle byte to display>\n", argv[0]);
+			fprintf(stderr, "Usage: %s -A <AB3418 port, (def. /dev/ttyS0)> -S <CA SPaT port, (def. /dev/ttyS1)> -x (use data from file, which should be piped into stdin) -v (verbose) -b (output binary SPaT message) -s <UDP unicast destination (def. 127.0.0.1)> -o <UDP unicast port> -l <lowest Battelle byte to display> -h <highest Battelle byte to display>\n", argv[0]);
 			exit(EXIT_FAILURE);
 		}
 	}
@@ -220,7 +227,8 @@ int main(int argc, char *argv[]) {
         /* Initialize serial port. */
 	if(do_ab3418)
 		check_retval = check_and_reconnect_serial(0, &ab3418_fdin, &ab3418_fdout, ab3418_port);
-	check_retval = check_and_reconnect_serial(0, &ca_spat_fdin, &ca_spat_fdout, ca_spat_port);
+	if(do_ca_spat)
+		check_retval = check_and_reconnect_serial(0, &ca_spat_fdin, &ca_spat_fdout, ca_spat_port);
 
 
 		if (setjmp(exit_env) != 0) {
@@ -328,9 +336,9 @@ while(1) {
 	if(FD_ISSET(ca_spat_fdin, &readfds)) {
 		if(do_ab3418){
 			retval = get_status(wait_for_data, &readBuff, ab3418_fdin, ab3418_fdout, verbose);
+			memcpy(&long_status8, &readBuff, sizeof(get_long_status8_resp_mess_typ));
 		}
 		retval = get_spat(wait_for_data, &raw_signal_status_msg, ca_spat_fdin, verbose, output_spat_binary);
-		memcpy(&long_status8, &readBuff, sizeof(get_long_status8_resp_mess_typ));
 //printf("ab3418commudp: Got to 1\n");
                 memset(&spatbuf[7], 0, sizeof(spatbuf)-7);
 		spatmsgsize = 0;
