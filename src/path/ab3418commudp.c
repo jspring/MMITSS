@@ -825,11 +825,12 @@ int init_spat(SPAT_t *spatType, unsigned char *spatbuf, int *spatmsgsize, sig_pl
 	unsigned char curr_plan_num;
 	unsigned char phase_sequence[MAX_PHASES];
 	unsigned char phase_sequence_rev[MAX_PHASES];
-	unsigned char interval_multiplier[] = {1,1,10,1,10,10,10,10,1,1,1,1,1,1,1,1};
+	unsigned char interval_multiplier[] = {10,10,10,1,10,10,10,10,1,1,1,1,1,1,1,1};
 	unsigned char Max_Green[8];
 	unsigned char Min_Green[8];
 	unsigned char countdown_timer;
-	static int reduce_gap_start_time[MAX_PHASES] = {0,0,0,0,0,0,0,0};
+	static int reduce_gap_start_time7[MAX_PHASES] = {0,0,0,0,0,0,0,0};
+	static int reduce_gap_start_time5[MAX_PHASES] = {0,0,0,0,0,0,0,0};
 
 
 
@@ -913,7 +914,7 @@ int init_spat(SPAT_t *spatType, unsigned char *spatbuf, int *spatmsgsize, sig_pl
                         phase_sequence[index] = i+1;
                         phase_sequence[index+2] = i;
 		}
-                j = 1 << i+4;
+                j = 1 << (i+4);
                 if( !(j & pplan_params[curr_plan_num]->lag_phases) ) {
 			//i+4 is a LEADING phase
                         phase_sequence[index+1] = i+4;
@@ -950,21 +951,38 @@ printf("lag phases %#hhx plan num %d\n", pplan_params[curr_plan_num]->lag_phases
 
                 if(ca_spat->active_phase & j) { //Active phase calculations
                         if(interval == 0x07) {
-                                if(reduce_gap_start_time[i] != 0)
+                                if(reduce_gap_start_time7[i] != 0)
                                         timeToChange[i]= 
-//						(10 * phase_timing[i]->max_green1) - ((tstemp - reduce_gap_start_time[i])/100);
-						(10 * Max_Green[i]) - ((tstemp - reduce_gap_start_time[i])/100);
+//						(10 * phase_timing[i]->max_green1) - ((tstemp - reduce_gap_start_time7[i])/100);
+						(10 * Max_Green[i]) - ((tstemp - reduce_gap_start_time7[i])/100);
                                 else {
                                         timeToChange[i]= 
 						10 * Max_Green[i];
 //						10 * phase_timing[i]->max_green1;
-                                        reduce_gap_start_time[i] = tstemp;
+                                        reduce_gap_start_time7[i] = tstemp;
                                 }
                         }
                         else {
                                 countdown_timer = (i<4) ? ca_spat->intvA_timer : ca_spat->intvB_timer;
                                 timeToChange[i] = interval_multiplier[interval] * countdown_timer;
-                                reduce_gap_start_time[i] = 0;
+                                reduce_gap_start_time7[i] = 0;
+                        }
+                        if(interval == 0x05) {
+                                if(reduce_gap_start_time5[i] != 0)
+                                        timeToChange[i]= 
+//						(10 * phase_timing[i]->max_green1) - ((tstemp - reduce_gap_start_time5[i])/100);
+						(10 * Max_Green[i]) - ((tstemp - reduce_gap_start_time5[i])/100);
+                                else {
+                                        timeToChange[i]= 
+						10 * Max_Green[i];
+//						10 * phase_timing[i]->max_green1;
+                                        reduce_gap_start_time5[i] = tstemp;
+                                }
+                        }
+                        else {
+                                countdown_timer = (i<4) ? ca_spat->intvA_timer : ca_spat->intvB_timer;
+                                timeToChange[i] = interval_multiplier[interval] * countdown_timer;
+                                reduce_gap_start_time5[i] = 0;
                         }
 printf("timer for movement %d %ld interval %hhx plan %hhu\n", i+1, timeToChange[i], interval, curr_plan_num);
 
@@ -978,7 +996,7 @@ printf("timer for movement %d %ld interval %hhx plan %hhu\n", i+1, timeToChange[
                                         ca_spat->veh_call,
                                         ca_spat->ped_call
                                 );
-                                printf("active phase: timeToChange[%d] %f interval %#hhx\n", i+1, timeToChange[i]/10.0, interval);
+                                printf("active phase: timeToChange[%d] %f interval %#hhx next phase %hhx \n", i+1, timeToChange[i]/10.0, interval, ca_spat->next_phase);
 			}
                 }
 
