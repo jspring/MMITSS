@@ -978,6 +978,8 @@ printf("lag phases %#hhx plan num %d\n", pplan_params[curr_plan_num]->lag_phases
 //						10 * phase_timing[i]->max_green1;
                                         reduce_gap_start_time5[i] = tstemp;
                                 }
+				if(pplan_params[curr_plan_num]->hold_phases & ca_spat->active_phase)
+					timeToChange[i] = 10 * (pplan_params[curr_plan_num]->cycle_length - ca_spat->local_cycle_clock);
                         }
                         else {
                                 countdown_timer = (i<4) ? ca_spat->intvA_timer : ca_spat->intvB_timer;
@@ -996,7 +998,7 @@ printf("timer for movement %d %ld interval %hhx plan %hhu\n", i+1, timeToChange[
                                         ca_spat->veh_call,
                                         ca_spat->ped_call
                                 );
-                                printf("active phase: timeToChange[%d] %f interval %#hhx next phase %hhx \n", i+1, timeToChange[i]/10.0, interval, ca_spat->next_phase);
+                                printf("active phase: timeToChange[%d] %f interval %#hhx next phase %hhx hold_phase %hhx curr_plan_num %d\n", i+1, timeToChange[i]/10.0, interval, ca_spat->next_phase, pplan_params[curr_plan_num]->hold_phases, curr_plan_num);
 			}
                 }
 
