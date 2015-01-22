@@ -8,10 +8,13 @@ SERVER_LIB = $(OBJDIR)/libserver_lib.a
 SERVER_LIB_OBJS = $(OBJDIR)/server_lib.o
 AZ_INC_DIR = /home/mmitss/source/Utilities/SPATendecoder/Win32Project1/Win32Project1
 AZ_LD_DIR = /home/mmitss/source/Utilities/SPATendecoder/Win32Project1/Win32Project1/module.asn1-1
+AZ_MAP_DIR = /home/mmitss/source/MRP/MRP_MAP_SPaT_Broadcast/Linux
+SAVARI_INC_DIR = /home/jspring/savari/SDK_toolchain_and_Images/RSE/savari_sdk/toolchain/usr/include/
+ASN_MAP_DIR = /home/jspring/asn1c_Sandbox/MAPDataObject
 
 PATH_LIBS = -lserver_lib -ldl -lrt
 PATH_LDFLAGS += -L./lnx -L$(AZ_LD_DIR)
-PATH_CFLAGS += -Wall -pg -I. -I$(AZ_INC_DIR)
+PATH_CFLAGS += -Wall -pg -I. -I$(AZ_INC_DIR) -fpermissive
 PATH_OBJS = $(OBJDIR)/timestamp.o \
 	$(OBJDIR)/sys_rt_linux.o \
 	$(OBJDIR)/ab3418_libudp.o \
@@ -20,16 +23,18 @@ PATH_OBJS = $(OBJDIR)/timestamp.o \
 OBJDIR = lnx
 
 EXEC = $(OBJDIR)/data_manager $(OBJDIR)/server $(OBJDIR)/client $(OBJDIR)/ab3418commudp $(OBJDIR)/sim_spat
-
+#EXEC = $(OBJDIR)/server $(OBJDIR)/client $(OBJDIR)/ab3418commudp
 
 all: $(OBJDIR) $(SERVER_LIB) $(PATH_OBJS) $(EXEC) 
 
 $(OBJDIR)/%.o: %.c
-	gcc -c -DGNU_SOURCE $(PATH_CFLAGS) $*.c -o $@ -I$(AZ_INC_DIR)
+	g++ -c -DGNU_SOURCE $(PATH_CFLAGS) $*.c -o $@ -I$(AZ_INC_DIR) -I$(AZ_MAP_DIR) -I$(SAVARI_INC_DIR) -I$(ASN_MAP_DIR)
+#	gcc -c -DGNU_SOURCE $(PATH_CFLAGS) $*.c -o $@ -I$(AZ_INC_DIR)
 #	gcc -c -DGNU_SOURCE $(PATH_CFLAGS) $*.c -o $@ $(AZ_LD_DIR)/der_encoder.o
 
 .o: $(SERVER_LIB_OBJS)
-	gcc -L./lnx -o $@ $@.o $(PATH_OBJS) $(PATH_LIBS) -L$(AZ_LD_DIR) $(AZ_LD_DIR)/*.o
+	g++ -L./lnx -o $@ $@.o $(PATH_OBJS) $(PATH_LIBS) -L$(AZ_LD_DIR) $(AZ_LD_DIR)/*.o -L$(AZ_MAP_DIR) $(AZ_MAP_DIR)/NMAP.o
+#	gcc -L./lnx -o $@ $@.o $(PATH_OBJS) $(PATH_LIBS) -L$(AZ_LD_DIR) $(AZ_LD_DIR)/*.o -L$(AZ_MAP_DIR) $(AZ_MAP_DIR)/*.o
 #	gcc -L./lnx -o $@ $@.o $(PATH_OBJS) $(PATH_LIBS) $(AZ_LD_DIR)/der_encoder.o
 
 $(SERVER_LIB): $(SERVER_LIB_OBJS)
