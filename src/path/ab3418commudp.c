@@ -39,7 +39,7 @@ static int sig_list[] =
 
 int OpenTCPIPConnection(char *controllerIP, unsigned short port);
 int process_phase_status( get_long_status8_resp_mess_typ *pstatus, int verbose, unsigned char greens, phase_status_t *pphase_status);
-int init_spat(SPAT_t *spatType, unsigned char *spatbuf, int *spatmsgsize, sig_plan_msg_t *sig_plan_msg, raw_signal_status_msg_t *raw_signal_status_msg, phase_timing_t *pphase_timing[], get_long_status8_resp_mess_typ *long_status8, plan_params_t *pplan_params[], phase_flags_t *phase_flags, int verbose);
+int init_spat(SPAT_t *spatType, unsigned char *spatbuf, int *spatmsgsize, sig_plan_msg_t *sig_plan_msg, raw_signal_status_msg_t *raw_signal_status_msg, phase_timing_t *pphase_timing[], get_long_status8_resp_mess_typ *long_status8, plan_params_t *pplan_params[], phase_flags_t *phase_flags, char *intersection_name, char *intersection_id, int verbose);
 
 #define NUMMOVEMENTS	8
 
@@ -73,6 +73,8 @@ int main(int argc, char *argv[]) {
 	MovementState_t movestate[NUMMOVEMENTS];
 	unsigned char spatbuf[1000];
 	int spatmsgsize;
+	char *intersection_name = NULL;
+	char *intersection_id= 0;
 
 	mschedule_t mschedule;
 	db_timing_set_2070_t db_timing_set_2070;
@@ -123,7 +125,7 @@ int main(int argc, char *argv[]) {
 	unsigned char curr_plan_num = 255;
 	unsigned char curr_plan_num_sav = 255;
 
-        while ((opt = getopt(argc, argv, "A:S:v::na:beo:s:xz")) != -1)
+        while ((opt = getopt(argc, argv, "A:S:v::na:beo:s:xzi:")) != -1)
         {
                 switch (opt)
                 {
@@ -176,9 +178,20 @@ int main(int argc, char *argv[]) {
 			ca_spat_fdin = STDIN_FILENO;
 			ca_spat_fdout = STDOUT_FILENO;
                         break;
+                  case 'i':
+			if( strcmp(optarg, "n") >= 0) {
+				intersection_name = strdup(optarg);
+				printf("intersection_name %s\n", intersection_name+2);
+                        	break;
+			}
+			if( strcmp(optarg, "d") > 0) {
+				intersection_id = strdup(optarg);
+				printf("intersection_id %s\n", intersection_id+2);
+                        	break;
+			}
 		  case 'z':
 		  default:
-			fprintf(stderr, "Usage: %s -A <AB3418 port, (def. /dev/ttyS0)> -S <CA SPaT port, (def. /dev/ttyS1)> -x (use data from file, which should be piped into stdin) -v (verbose) -b (output binary SPaT message) -s <UDP unicast destination (def. 127.0.0.1)> -o <UDP unicast port> -l <lowest Battelle byte to display> -h <highest Battelle byte to display>\n", argv[0]);
+			fprintf(stderr, "Usage: %s -A <AB3418 port, (def. /dev/ttyS0)> -S <CA SPaT port, (def. /dev/ttyS1)> -x (use data from file, which should be piped into stdin) -v (verbose) -b (output binary SPaT message) -s <UDP unicast destination (def. 127.0.0.1)> -o <UDP unicast port> -l <lowest Battelle byte to display> -h <highest Battelle byte to display> -id=<intersection id> -in=<intersection name>\n", argv[0]);
 			exit(EXIT_FAILURE);
 		}
 	}
@@ -342,7 +355,7 @@ while(1) {
 //printf("ab3418commudp: Got to 1\n");
                 memset(&spatbuf[7], 0, sizeof(spatbuf)-7);
 		spatmsgsize = 0;
-		init_spat(spatType, spatbuf, &spatmsgsize, &sig_plan_msg, &raw_signal_status_msg, pphase_timing, &long_status8, pplan_params, &phase_flags, verbose);
+		init_spat(spatType, spatbuf, &spatmsgsize, &sig_plan_msg, &raw_signal_status_msg, pphase_timing, &long_status8, pplan_params, &phase_flags, intersection_name, intersection_id, verbose);
 		spatmsgsize += 7; //7 bytes accounts for the MMITSS header (0xFFFF + msgID + timestamp)
 
 	if(veryverbose) {                                           
@@ -803,7 +816,7 @@ printf("\n");
 }
 */
 
-int init_spat(SPAT_t *spatType, unsigned char *spatbuf, int *spatmsgsize, sig_plan_msg_t *sig_plan_msg, raw_signal_status_msg_t *ca_spat, phase_timing_t *phase_timing[], get_long_status8_resp_mess_typ *long_status8, plan_params_t *pplan_params[], phase_flags_t *phase_flags, int verbose) {
+int init_spat(SPAT_t *spatType, unsigned char *spatbuf, int *spatmsgsize, sig_plan_msg_t *sig_plan_msg, raw_signal_status_msg_t *ca_spat, phase_timing_t *phase_timing[], get_long_status8_resp_mess_typ *long_status8, plan_params_t *pplan_params[], phase_flags_t *phase_flags, char *intersection_name, char *intersection_id, int verbose) {
         
 
 	int ret;
@@ -812,9 +825,8 @@ int init_spat(SPAT_t *spatType, unsigned char *spatbuf, int *spatmsgsize, sig_pl
         
         
 	char *spat_msg_name = "MMITSS_SPaT_msg";
-	char *intersection_name = "El_Camino_and_Matadero";
 	char movement_name[8] = "Phase 1";
-	char intersection_id[2]={0x12, 0x34};
+//	char intersection_id[2]={0x12, 0x34};
 	char intersection_status;
 	char laneset[4] = {1, 2, 3, 4};
 
@@ -864,11 +876,15 @@ int init_spat(SPAT_t *spatType, unsigned char *spatbuf, int *spatmsgsize, sig_pl
 		OCTET_STRING_new_fromBuf(&asn_DEF_OCTET_STRING, spat_msg_name, -1);
 
 
+	if(intersection_name == NULL)
+		intersection_name = "El_Camino_and_Matadero";
         spatType->intersections.list.array[0]->name =
-		OCTET_STRING_new_fromBuf(&asn_DEF_OCTET_STRING, intersection_name, -1);
+		OCTET_STRING_new_fromBuf(&asn_DEF_OCTET_STRING, intersection_name+2, -1);
 
+	if(intersection_id == NULL)
+		intersection_id = "0x10";
         spatType->intersections.list.array[0]->id =
-		*OCTET_STRING_new_fromBuf(&asn_DEF_OCTET_STRING, intersection_id, 2);  //IntersectionID
+		*OCTET_STRING_new_fromBuf(&asn_DEF_OCTET_STRING, intersection_id+2, -1);  //IntersectionID
 
 
 	//IntersectionStatusObject
