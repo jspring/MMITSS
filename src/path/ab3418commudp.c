@@ -847,7 +847,7 @@ int init_spat(SPAT_t *spatType, unsigned char *spatbuf, int *spatmsgsize, sig_pl
 
 
 	unsigned char interval;
-	int tstemp;
+	long tstemp;
 	static long movementcnt = NUMMOVEMENTS;
 	static long lanecnt[NUMMOVEMENTS] = {0};
 	static long SignalLightState[NUMMOVEMENTS] = {0};
@@ -897,7 +897,7 @@ int init_spat(SPAT_t *spatType, unsigned char *spatbuf, int *spatmsgsize, sig_pl
         else
                 intersection_status = INTERSECTION_STATUS_MANUAL;
         spatType->intersections.list.array[0]->status =
-		*OCTET_STRING_new_fromBuf(&asn_DEF_OCTET_STRING, &intersection_status, 1);  //IntersectionStatusObject
+		*OCTET_STRING_new_fromBuf(&asn_DEF_OCTET_STRING, &intersection_status, -1);  //IntersectionStatusObject
 
         //TimeMark
         get_current_timestamp(&ts);
