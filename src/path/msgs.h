@@ -63,6 +63,47 @@ typedef struct
 
 typedef struct
 {
+	char          start_flag;   /* 0x7e */
+	char          address;      /* 0x05 Requester PC */
+	char          control;      /* 0x13 - unnumbered information, individual address */
+	char          ipi;          /* 0xc0 - NTCIP Class B Protocol */
+	char          mess_type;    /* 0xc8 - short status8e response */
+	unsigned char hour;	    /* Controller timestamp - hour, 0 to 23 */
+	unsigned char min;	    /* Controller timestamp - minute, 0 to 59 */
+	unsigned char sec;	    /* Controller timestamp - second, 0 to 59 */
+	unsigned char flags;	    /* bit 0 =focus (default 0 - no focus) */
+	unsigned char status;       /* Bit 7 = critical alarm; bit 6 = non-critical alarm
+	                             * bit 5 = detector fault; bit 4 = coordination alarm
+	                             * bit 3 = local override; bit 2 = passed local zero
+	                             * bit 1 = cabinet flash; bit 0 = preempt */
+	unsigned char plan_num;
+	unsigned char green_overlaps;
+	unsigned char yellow_overlaps;
+	unsigned char preempt;
+	unsigned char veh_call;
+	unsigned char ped_call;
+	unsigned char active_phase;
+	unsigned char interval;
+	unsigned char presence1;
+	unsigned char presence2;
+	unsigned char presence3;
+	unsigned char presence4;
+	unsigned char presence5;
+	unsigned char master_cycle_clock;
+	unsigned char local_cycle_clock;
+	unsigned char busID_high;
+	unsigned char busID_low;
+	unsigned char priority_type;
+	unsigned char spare1;
+	unsigned char spare2;
+	unsigned char spare3;
+	unsigned char FCSmsb;        /* FCS (Frame Checking Sequence) MSB */
+	unsigned char FCSlsb;        /* FCS least significant byte */
+	char          end_flag;      /* 0x7e */
+} IS_PACKED short_status8e_t;
+
+typedef struct
+{
 	char      start_flag;   /* 0x7e */
 	char      address;      /* 0x05 2070 controller */
 	char      control;      /* 0x13 - unnumbered information, individual address */
@@ -434,6 +475,44 @@ typedef struct {
 
 } raw_signal_status_msg_t;
 
+typedef struct {
+	unsigned char start_flag;        // 0x7e
+	unsigned char address;           // controller address, 1 to 255
+	unsigned char control;            // 0x13 - unnumbered information, individual address
+	unsigned char ipi;                    // 0xc0 - NTCIP Class B Protocol 
+	unsigned char mess_type;     // 0x9A – Set soft call message	
+	unsigned char veh_call;          // Bits 0-7 phase 1-8
+	unsigned char ped_call;         // Bits 0-7 phase 1-8
+	unsigned char prio_call;         // Bits 0-7 phase 1-8
+	unsigned char spare1;            // reserved
+	unsigned char spare2;            // reserved
+	unsigned char spare3;            // reserved
+	unsigned char spare4;            // reserved
+	unsigned char spare5;            // reserved
+	unsigned char FCSmsb;          // FCS (Frame Checking Sequence) MSB 
+	unsigned char FCSlsb;             // FCS least significant byte
+	unsigned char end_flag;         // 0x7e
+} IS_PACKED set_softcall_mess_t;
+
+#define SOFT_CALL_MSG        0x44
+typedef struct {
+        unsigned short          internal_msg_header; //=0xFFFF
+        unsigned char           soft_call_msg_id; //=0x44
+        unsigned int            ms_since_midnight;
+
+	unsigned char call_phase;	// Bit mapped phase, bits 0-7 phase 1-8
+	unsigned char call_obj;		// 1 = pedestrian
+					// 2 = vehicular
+					// 3 = TSP
+	unsigned char call_type;	// 1 = call (for ped, vehicular & TSP early green)
+					// 2 = extension (for vehicular & TSP green extension)
+					// 3 = cancel (for vehicular & TSP)
+	unsigned char call_number;	// how many times the SET soft-call commands need to be sent to the controller
+					// = 1 when call_type = 1 or 3
+					// = x (x <= 3) when call_obj = 2 & call_type = 2
+					// = 0 when call_obj = 3 & call_type = 2
+} IS_PACKED mmitss_control_msg_t;
+
 typedef union
 {
 	get_long_status8_mess_typ         get_long_status8_mess;
@@ -446,6 +525,9 @@ typedef union
 	overlap_msg_t			overlap_msg;
 	get_short_status_request_t	get_short_status_resp;
 	detector_msg_t			detector_msg;
+	mmitss_control_msg_t		mmitss_control_msg;
+	set_softcall_mess_t		set_softcall_mess;
+	short_status8e_t		short_status8e;
 
 } IS_PACKED mess_union_typ;
 
