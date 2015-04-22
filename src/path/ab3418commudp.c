@@ -54,11 +54,10 @@ int main(int argc, char *argv[]) {
 	int ca_spat_fdout = -1;
 	int do_ab3418 = 1;
 	int do_ca_spat = 1;
-	char datamgr_readbuff[60];
-	int len;
 	int wait_for_data = 1;
 	gen_mess_typ readBuff;
 	get_long_status8_resp_mess_typ long_status8; 
+	short_status8e_t short_status8e;
 	sig_plan_msg_t sig_plan_msg;
 	phase_timing_t phase_timing[MAX_PHASES];
 	phase_timing_t *pphase_timing[MAX_PHASES];
@@ -77,6 +76,8 @@ int main(int argc, char *argv[]) {
 	char *intersection_id= 0;
 
 	mschedule_t mschedule;
+	mmitss_control_msg_t soft_call;
+
 	db_timing_set_2070_t db_timing_set_2070;
 	db_timing_get_2070_t db_timing_get_2070;
 	int retval;
@@ -85,6 +86,8 @@ int main(int argc, char *argv[]) {
 	char ab3418_port[20] = "/dev/ttyS1";
 	char strbuf[300];
 	struct sockaddr_storage datamgr_addr;
+	unsigned int len = sizeof(datamgr_addr);
+	char datamgr_readbuff[60];
 
 
 	struct timespec start_time;
@@ -98,7 +101,7 @@ int main(int argc, char *argv[]) {
 	int opt;
 	int verbose = 0;
 	int veryverbose = 0;
-	int veryveryverbose = 0;
+//	int veryveryverbose = 0;
 	int low_spat = -1;
 	int high_spat = -1;
 	unsigned char no_control = 0;
@@ -142,11 +145,13 @@ int main(int argc, char *argv[]) {
 			if(optarg) {
 			if( strcmp(optarg, "v") >= 0) 
 				veryverbose = 1;
-			if( strcmp(optarg, "v") > 0) 
-				veryveryverbose = 1;
+//			if( strcmp(optarg, "v") > 0) 
+//				veryveryverbose = 1;
 			}
-			printf("verbose %d veryverbose %d veryveryverbose %d\n",
-			verbose, veryverbose, veryveryverbose);
+//			printf("verbose %d veryverbose %d veryveryverbose %d\n",
+//			verbose, veryverbose, veryveryverbose);
+			printf("verbose %d veryverbose %d\n",
+			verbose, veryverbose);
                         break;
                   case 'n':
                         no_control = 1;
@@ -191,7 +196,8 @@ int main(int argc, char *argv[]) {
 			}
 		  case 'z':
 		  default:
-			fprintf(stderr, "Usage: %s -A <AB3418 port, (def. /dev/ttyS0)> -S <CA SPaT port, (def. /dev/ttyS1)> -x (use data from file, which should be piped into stdin) -v (verbose) -b (output binary SPaT message) -s <UDP unicast destination (def. 127.0.0.1)> -o <UDP unicast port> -l <lowest Battelle byte to display> -h <highest Battelle byte to display> -id=<intersection id> -in=<intersection name>\n", argv[0]);
+//			fprintf(stderr, "Usage: %s -A <AB3418 port, (def. /dev/ttyS0)> -S <CA SPaT port, (def. /dev/ttyS1)> -x (use data from file, which should be piped into stdin) -v (verbose) -vv (veryverbose, i.e. add decoding of SPaT output) -b (output binary SPaT message) -s <UDP unicast destination (def. 127.0.0.1)> -o <UDP unicast port> -l <lowest Battelle byte to display> -h <highest Battelle byte to display> -id=<intersection id> -in=<intersection name>\n", argv[0]);
+			fprintf(stderr, "Usage: %s -A <AB3418 port, (def. /dev/ttyS0)> -S <CA SPaT port, (def. /dev/ttyS1)> -v (verbose) -vv (veryverbose, i.e. add decoding of SPaT output) -b (output binary SPaT message) -s <UDP unicast destination (def. 127.0.0.1)> -o <UDP unicast port> -id=<intersection id> -in=<intersection name>\n", argv[0]);
 			exit(EXIT_FAILURE);
 		}
 	}
@@ -348,8 +354,7 @@ while(1) {
 
 	if(FD_ISSET(ca_spat_fdin, &readfds)) {
 		if(do_ab3418){
-			retval = get_status(wait_for_data, &readBuff, ab3418_fdin, ab3418_fdout, verbose);
-			memcpy(&long_status8, &readBuff, sizeof(get_long_status8_resp_mess_typ));
+//			retval = get_status(0, &readBuff, ab3418_fdin, ab3418_fdout, verbose);
 		}
 		retval = get_spat(wait_for_data, &raw_signal_status_msg, ca_spat_fdin, verbose, output_spat_binary);
 //printf("ab3418commudp: Got to 1\n");
@@ -390,8 +395,8 @@ while(1) {
 //			if(long_status8.pattern < 252) 
 			retval = get_coord_params(&plan_params[curr_plan_num], 
 				curr_plan_num, 
-//				wait_for_data, &ab3418_fdout, &ab3418_fdin, verbose);
-				wait_for_data, &ab3418_fdout, &ab3418_fdin, 1);
+				wait_for_data, &ab3418_fdout, &ab3418_fdin, verbose);
+//				wait_for_data, &ab3418_fdout, &ab3418_fdin, 1);
 //			if(retval < 0) {
 				printf("get_coord_params returned %d for plan %d %d\n",
 					retval, curr_plan_num, raw_signal_status_msg.plan_num);
@@ -408,8 +413,8 @@ while(1) {
 				}
 			}
 			retval = build_sigplanmsg(&sig_plan_msg, pphase_timing, 
-//				&plan_params[curr_plan_num], &long_status8, verbose);
-				&plan_params[curr_plan_num], &long_status8, 1);
+				&plan_params[curr_plan_num], &long_status8, verbose);
+//				&plan_params[curr_plan_num], &long_status8, 1);
 			if(datamgr_out >= 0)
 //			    bytes_sent = sendto(datamgr_out, &sig_plan_msg, sizeof(sig_plan_msg_t), 0,
 //				(struct sockaddr *) &snd_addr, sizeof(snd_addr));
@@ -452,14 +457,34 @@ while(1) {
 		}
 //	    bytes_sent = write(datamgr_out, &spatbuf, spatmsgsize);
 	    bytes_sent = sendto(datamgr_out, &spatbuf, spatmsgsize, 0, (struct sockaddr *)&dest_addr, addrlen);
-
-//exit(EXIT_SUCCESS);
+	}
+	if(FD_ISSET(ab3418_fdin, &readfds)) {
+		retval = ser_driver_read(&readBuff, ab3418_fdin, verbose);
+		if(retval == 0)
+			printf("Error in ser_driver_read\n");
+		else {
+			switch(readBuff.data[4]) {
+				case 0xcc:    // GetLongStatus8 message
+					printf("Hey, Hey, I got LongStatus8!\n");
+					memcpy(&long_status8, &readBuff, sizeof(get_long_status8_resp_mess_typ));
+					break;
+				case 0xc8:    // GetShortStatus8e message
+					printf("Hey, Hey, I got ShortStatus8e!\n");
+					memcpy(&short_status8e, &readBuff, sizeof(short_status8e_t));
+					break;
+			}
+		}
 	}
 	if(do_ab3418){
 	    if( (datamgr_in >=0) && (FD_ISSET(datamgr_in, &readfds)) ) {
-		memset(datamgr_readbuff, 0, sizeof(datamgr_readbuff));
-		if( (retval = recvfrom(datamgr_in, datamgr_readbuff, sizeof(datamgr_readbuff), 0,
+printf("1Got data from data manager \n");
+		memset(datamgr_readbuff, 0, 60);
+		if( (retval = recvfrom(datamgr_in, datamgr_readbuff, 60, 0,
 			(struct sockaddr *)&datamgr_addr, (socklen_t *)&len)) > 0) {
+printf("2Got data from data manager: ");
+for(i=0 ;i<retval; i++ )
+printf("%#hhx ", datamgr_readbuff[i]);
+printf("\n");
 			if(datamgr_readbuff[2] == SIGNAL_SCHED_MSG) {
 				printf("datamgr_readbuff: \n");
 				for(i=0; i<sizeof(datamgr_readbuff); i++) 
@@ -481,6 +506,18 @@ no_control = 0;
 					retval = set_coord_params(&plan_params[9], 9, &mschedule, 1, 
 						ab3418_fdout, ab3418_fdin, verbose);
 			}
+			else {
+				if(datamgr_readbuff[2] == SOFT_CALL_MSG) {
+					
+				memcpy(&soft_call, datamgr_readbuff, sizeof(mmitss_control_msg_t));
+				printf("Soft call request:\n");
+				printf("Phase %#0x Object %d Type %d Number %d\n", soft_call.call_phase, soft_call.call_obj, soft_call.call_type, soft_call.call_number);
+				retval = set_soft_call(&soft_call, ab3418_fdout, ab3418_fdin, verbose);
+				}
+			}
+		}
+		else {
+			perror("recvfrom TC"); 
 		}
 	    }
 	}
@@ -847,7 +884,7 @@ int init_spat(SPAT_t *spatType, unsigned char *spatbuf, int *spatmsgsize, sig_pl
 
 
 	unsigned char interval;
-	int tstemp;
+	long tstemp;
 	static long movementcnt = NUMMOVEMENTS;
 	static long lanecnt[NUMMOVEMENTS] = {0};
 	static long SignalLightState[NUMMOVEMENTS] = {0};
@@ -897,7 +934,7 @@ int init_spat(SPAT_t *spatType, unsigned char *spatbuf, int *spatmsgsize, sig_pl
         else
                 intersection_status = INTERSECTION_STATUS_MANUAL;
         spatType->intersections.list.array[0]->status =
-		*OCTET_STRING_new_fromBuf(&asn_DEF_OCTET_STRING, &intersection_status, 1);  //IntersectionStatusObject
+		*OCTET_STRING_new_fromBuf(&asn_DEF_OCTET_STRING, &intersection_status, -1);  //IntersectionStatusObject
 
         //TimeMark
         get_current_timestamp(&ts);
@@ -943,12 +980,12 @@ int init_spat(SPAT_t *spatType, unsigned char *spatbuf, int *spatmsgsize, sig_pl
 		}
 	}
 
-printf("Phase sequence ");
-for(i=0; i<8; i++) 
-	phase_sequence_rev[phase_sequence[i]] = i;
-for(i=0; i<8; i++) 
-    printf("%d %d ", 1+phase_sequence[i], phase_sequence_rev[phase_sequence[i]]);
-printf("lag phases %#hhx plan num %d\n", pplan_params[curr_plan_num]->lag_phases, curr_plan_num);
+//printf("Phase sequence ");
+//for(i=0; i<8; i++) 
+//	phase_sequence_rev[phase_sequence[i]] = i;
+//for(i=0; i<8; i++) 
+//    printf("%d %d ", 1+phase_sequence[i], phase_sequence_rev[phase_sequence[i]]);
+//printf("lag phases %#hhx plan num %d\n", pplan_params[curr_plan_num]->lag_phases, curr_plan_num);
 
             for(i=0; i<NUMMOVEMENTS; i++) {
                 j = 1 << i;
@@ -1002,7 +1039,7 @@ printf("lag phases %#hhx plan num %d\n", pplan_params[curr_plan_num]->lag_phases
                                 timeToChange[i] = interval_multiplier[interval] * countdown_timer;
                                 reduce_gap_start_time5[i] = 0;
                         }
-printf("timer for movement %d %ld interval %hhx plan %hhu\n", i+1, timeToChange[i], interval, curr_plan_num);
+//printf("timer for movement %d %ld interval %hhx plan %hhu\n", i+1, timeToChange[i], interval, curr_plan_num);
 
                         Max_Green[i] = timeToChange[i];
                         Min_Green[i] = timeToChange[i];
@@ -1038,26 +1075,26 @@ printf("timer for movement %d %ld interval %hhx plan %hhu\n", i+1, timeToChange[
                         }
                 }
 	}
-printf("Phase sequence Got to 1\n");
+//printf("Phase sequence Got to 1\n");
 
 //Now, let's determine the entire trailing sequence of the current active phases
         for(i=0; i < NUMMOVEMENTS/2; i++) {
                 j = 1 << i;
 
-printf("Phase sequence Got to 2 i %d\n", i);
+//printf("Phase sequence Got to 2 i %d\n", i);
 		if(ca_spat->active_phase & j) { //Active phase calculations
 			start_index_phaseA = phase_sequence_rev[i];
-printf("Phase sequence Got to 3 j %hhx start_index %d\n", j, start_index_phaseA);
-			printf("Phase sequence after current active phase (low barrier group): %d ", i+1);
-			for(k = 1; ((start_index_phaseA + k) % 8) != start_index_phaseA; k++)
-				printf("%d ", 1+phase_sequence[( (start_index_phaseA + k) % 8) ]);	
-			printf("\n");
+//printf("Phase sequence Got to 3 j %hhx start_index %d\n", j, start_index_phaseA);
+//			printf("Phase sequence after current active phase (low barrier group): %d ", i+1);
+//			for(k = 1; ((start_index_phaseA + k) % 8) != start_index_phaseA; k++)
+//				printf("%d ", 1+phase_sequence[( (start_index_phaseA + k) % 8) ]);	
+//			printf("\n");
 			break;
                 }
         }
 
-printf("start_index_phaseA %hhu active_phaseA %hhu start_index_phaseB %hhu active_phaseB %hhu ", start_index_phaseA, active_phaseA, start_index_phaseB, active_phaseB);
-printf("\n");
+//printf("start_index_phaseA %hhu active_phaseA %hhu start_index_phaseB %hhu active_phaseB %hhu ", start_index_phaseA, active_phaseA, start_index_phaseB, active_phaseB);
+//printf("\n");
 
 #define GREENBALL	0x0001
 #define YELLOWBALL	0x0002
