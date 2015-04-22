@@ -17,7 +17,7 @@
 #define NOMADIC_DEV_OUTPORT		56014
 #define NOMADIC_DEV_INPORT		56015
 
-#define MSG_ID_SIG_PLAN_POLL		'0'
+#define MSG_ID_SIG_PLAN_POLL		0x11
 #define MSG_ID_SIG_PLAN			0x02
 #define MSG_ID_SPAT_POLL		'1'
 #define MSG_ID_SPAT			13
