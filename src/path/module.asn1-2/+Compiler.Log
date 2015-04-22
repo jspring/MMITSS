@@ -1,0 +1,92 @@
+-- ASN.1 Compiler, v0.9.22
+-- Copyright (c) 2003, 2004, 2005, 2006 Lev Walkin <vlm@lionet.info>
+Compiled SPAT.c
+Compiled SPAT.h
+Compiled DSRCmsgID.c
+Compiled DSRCmsgID.h
+Compiled DescriptiveName.c
+Compiled DescriptiveName.h
+Compiled IntersectionState.c
+Compiled IntersectionState.h
+Compiled IntersectionID.c
+Compiled IntersectionID.h
+Compiled IntersectionStatusObject.c
+Compiled IntersectionStatusObject.h
+Compiled TimeMark.c
+Compiled TimeMark.h
+Compiled LaneCount.c
+Compiled LaneCount.h
+Compiled MovementState.c
+Compiled MovementState.h
+Compiled LaneSet.c
+Compiled LaneSet.h
+Compiled SignalLightState.c
+Compiled SignalLightState.h
+Compiled PedestrianSignalState.c
+Compiled PedestrianSignalState.h
+Compiled SpecialSignalState.c
+Compiled SpecialSignalState.h
+Compiled StateConfidence.c
+Compiled StateConfidence.h
+Compiled ObjectCount.c
+Compiled ObjectCount.h
+Compiled PedestrianDetect.c
+Compiled PedestrianDetect.h
+Compiled SignalState.c
+Compiled SignalState.h
+Symlinked /skeletons/INTEGER.h	-> INTEGER.h
+Symlinked /skeletons/NativeEnumerated.h	-> NativeEnumerated.h
+Symlinked /skeletons/IA5String.h	-> IA5String.h
+Symlinked /skeletons/IA5String.c	-> IA5String.c
+Symlinked /skeletons/INTEGER.c	-> INTEGER.c
+Symlinked /skeletons/NativeEnumerated.c	-> NativeEnumerated.c
+Symlinked /skeletons/NativeInteger.h	-> NativeInteger.h
+Symlinked /skeletons/NativeInteger.c	-> NativeInteger.c
+Symlinked /skeletons/asn_SEQUENCE_OF.h	-> asn_SEQUENCE_OF.h
+Symlinked /skeletons/asn_SEQUENCE_OF.c	-> asn_SEQUENCE_OF.c
+Symlinked /skeletons/asn_SET_OF.h	-> asn_SET_OF.h
+Symlinked /skeletons/asn_SET_OF.c	-> asn_SET_OF.c
+Symlinked /skeletons/constr_SEQUENCE.h	-> constr_SEQUENCE.h
+Symlinked /skeletons/constr_SEQUENCE.c	-> constr_SEQUENCE.c
+Symlinked /skeletons/constr_SEQUENCE_OF.h	-> constr_SEQUENCE_OF.h
+Symlinked /skeletons/constr_SEQUENCE_OF.c	-> constr_SEQUENCE_OF.c
+Symlinked /skeletons/constr_SET_OF.h	-> constr_SET_OF.h
+Symlinked /skeletons/constr_SET_OF.c	-> constr_SET_OF.c
+Symlinked /skeletons/asn_application.h	-> asn_application.h
+Symlinked /skeletons/asn_system.h	-> asn_system.h
+Symlinked /skeletons/asn_codecs.h	-> asn_codecs.h
+Symlinked /skeletons/asn_internal.h	-> asn_internal.h
+Symlinked /skeletons/OCTET_STRING.h	-> OCTET_STRING.h
+Symlinked /skeletons/OCTET_STRING.c	-> OCTET_STRING.c
+Symlinked /skeletons/BIT_STRING.h	-> BIT_STRING.h
+Symlinked /skeletons/BIT_STRING.c	-> BIT_STRING.c
+Symlinked /skeletons/asn_codecs_prim.c	-> asn_codecs_prim.c
+Symlinked /skeletons/asn_codecs_prim.h	-> asn_codecs_prim.h
+Symlinked /skeletons/ber_tlv_length.h	-> ber_tlv_length.h
+Symlinked /skeletons/ber_tlv_length.c	-> ber_tlv_length.c
+Symlinked /skeletons/ber_tlv_tag.h	-> ber_tlv_tag.h
+Symlinked /skeletons/ber_tlv_tag.c	-> ber_tlv_tag.c
+Symlinked /skeletons/ber_decoder.h	-> ber_decoder.h
+Symlinked /skeletons/ber_decoder.c	-> ber_decoder.c
+Symlinked /skeletons/der_encoder.h	-> der_encoder.h
+Symlinked /skeletons/der_encoder.c	-> der_encoder.c
+Symlinked /skeletons/constr_TYPE.h	-> constr_TYPE.h
+Symlinked /skeletons/constr_TYPE.c	-> constr_TYPE.c
+Symlinked /skeletons/constraints.h	-> constraints.h
+Symlinked /skeletons/constraints.c	-> constraints.c
+Symlinked /skeletons/xer_support.h	-> xer_support.h
+Symlinked /skeletons/xer_support.c	-> xer_support.c
+Symlinked /skeletons/xer_decoder.h	-> xer_decoder.h
+Symlinked /skeletons/xer_decoder.c	-> xer_decoder.c
+Symlinked /skeletons/xer_encoder.h	-> xer_encoder.h
+Symlinked /skeletons/xer_encoder.c	-> xer_encoder.c
+Symlinked /skeletons/per_support.h	-> per_support.h
+Symlinked /skeletons/per_support.c	-> per_support.c
+Symlinked /skeletons/per_decoder.h	-> per_decoder.h
+Symlinked /skeletons/per_decoder.c	-> per_decoder.c
+Symlinked /skeletons/per_encoder.h	-> per_encoder.h
+Symlinked /skeletons/per_encoder.c	-> per_encoder.c
+Symlinked /skeletons/per_opentype.h	-> per_opentype.h
+Symlinked /skeletons/per_opentype.c	-> per_opentype.c
+Symlinked /skeletons/converter-sample.c	-> converter-sample.c
+Generated Makefile.am.sample

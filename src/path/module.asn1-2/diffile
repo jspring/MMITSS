@@ -1,0 +1,275 @@
+diff -w ./+Compiler.Log /home/jspring/mmitss/source/Utilities/SPATendecoder/Win32Project1/Win32Project1/module.asn1-1/+Compiler.Log
+17,18d16
+< Compiled LaneCount.c
+< Compiled LaneCount.h
+20a19,20
+> Compiled LaneCount.c
+> Compiled LaneCount.h
+Only in /home/jspring/mmitss/source/Utilities/SPATendecoder/Win32Project1/Win32Project1/module.asn1-1/: converter-sample.o
+Only in .: diffile
+diff -w ./DSRCmsgID.c /home/jspring/mmitss/source/Utilities/SPATendecoder/Win32Project1/Win32Project1/module.asn1-1/DSRCmsgID.c
+103d102
+< 	/* This list is extensible */
+123d121
+< 	/* This list is extensible */
+129c127
+< 	18,	/* Extensions before this member */
+---
+> 	0,	/* Enumeration is not extensible */
+diff -w ./DSRCmsgID.h /home/jspring/mmitss/source/Utilities/SPATendecoder/Win32Project1/Win32Project1/module.asn1-1/DSRCmsgID.h
+40,42d39
+< 	/*
+< 	 * Enumeration is extensible
+< 	 */
+diff -w ./IntersectionState.c /home/jspring/mmitss/source/Utilities/SPATendecoder/Win32Project1/Win32Project1/module.asn1-1/IntersectionState.c
+186,193c186,193
+<     { (ASN_TAG_CLASS_CONTEXT | (0 << 2)), 0, 0, 0 }, /* name at 44 */
+<     { (ASN_TAG_CLASS_CONTEXT | (1 << 2)), 1, 0, 0 }, /* id at 47 */
+<     { (ASN_TAG_CLASS_CONTEXT | (2 << 2)), 2, 0, 0 }, /* status at 52 */
+<     { (ASN_TAG_CLASS_CONTEXT | (3 << 2)), 3, 0, 0 }, /* timeStamp at 54 */
+<     { (ASN_TAG_CLASS_CONTEXT | (4 << 2)), 4, 0, 0 }, /* lanesCnt at 57 */
+<     { (ASN_TAG_CLASS_CONTEXT | (5 << 2)), 5, 0, 0 }, /* states at 60 */
+<     { (ASN_TAG_CLASS_CONTEXT | (6 << 2)), 6, 0, 0 }, /* priority at 64 */
+<     { (ASN_TAG_CLASS_CONTEXT | (7 << 2)), 7, 0, 0 } /* preempt at 66 */
+---
+>     { (ASN_TAG_CLASS_CONTEXT | (0 << 2)), 0, 0, 0 }, /* name at 36 */
+>     { (ASN_TAG_CLASS_CONTEXT | (1 << 2)), 1, 0, 0 }, /* id at 39 */
+>     { (ASN_TAG_CLASS_CONTEXT | (2 << 2)), 2, 0, 0 }, /* status at 44 */
+>     { (ASN_TAG_CLASS_CONTEXT | (3 << 2)), 3, 0, 0 }, /* timeStamp at 46 */
+>     { (ASN_TAG_CLASS_CONTEXT | (4 << 2)), 4, 0, 0 }, /* lanesCnt at 49 */
+>     { (ASN_TAG_CLASS_CONTEXT | (5 << 2)), 5, 0, 0 }, /* states at 52 */
+>     { (ASN_TAG_CLASS_CONTEXT | (6 << 2)), 6, 0, 0 }, /* priority at 56 */
+>     { (ASN_TAG_CLASS_CONTEXT | (7 << 2)), 7, 0, 0 } /* preempt at 58 */
+201,202c201,202
+< 	7,	/* Start extensions */
+< 	9	/* Stop extensions */
+---
+> 	-1,	/* Start extensions */
+> 	-1	/* Stop extensions */
+diff -w ./IntersectionState.h /home/jspring/mmitss/source/Utilities/SPATendecoder/Win32Project1/Win32Project1/module.asn1-1/IntersectionState.h
+47,50d46
+< 	/*
+< 	 * This type is extensible,
+< 	 * possible extensions are below.
+< 	 */
+Only in /home/jspring/mmitss/source/Utilities/SPATendecoder/Win32Project1/Win32Project1/module.asn1-1/: Makefile
+Only in .: Makefile.am.sample
+diff -w ./module.asn1 /home/jspring/mmitss/source/Utilities/SPATendecoder/Win32Project1/Win32Project1/module.asn1-1/module.asn1
+8,10c8,9
+<                  -- to be used only in debug mode
+< 
+<    intersections SEQUENCE (SIZE(1..32)) OF IntersectionState,
+---
+> -- to be used only in debug mode,                                                                                                             
+> intersections SEQUENCE (SIZE(1..32)) OF IntersectionState                                                                                     
+12,13d10
+< 
+<    ... -- # LOCAL_CONTENT
+33,35c30
+<    travelerInformation             (16), -- TIM
+<    
+<    ... -- # LOCAL_CONTENT
+---
+> travelerInformation (16)
+37,39d31
+<    -- values to 127 reserved for std use
+<    -- values 128 to 255 reserved for local use
+< 
+66c58
+<    preempt     SignalState OPTIONAL,
+---
+> preempt SignalState OPTIONAL
+68,69d59
+<    
+<    ... -- # LOCAL_CONTENT
+72,73d61
+< 
+< 
+99,100d86
+< LaneCount ::= INTEGER (0..255) -- the number of lanes to follow
+< 
+119d104
+<    
+123d107
+<    
+133d116
+<    
+136d118
+<    
+143c125
+<    pedCount      ObjectCount OPTIONAL,  
+---
+> pedCount ObjectCount OPTIONAL
+145d126
+<    ... -- # LOCAL_CONTENT
+147a129,130
+> LaneCount ::= INTEGER (0..255) -- the number of lanes to follow
+> 
+155,163c138
+<   -- using the bits defined by the below table of the standard.
+< 
+< --* Note: DARK = 0x00000000
+< 
+< --The Signal Light State value is built by ORing the various bitmasks together for that approach.
+< 
+< -- Examples:	Solid Green Ball = 0x00000001, transmitted as 0x01
+< --		Flashing Green Ball = 0x00000009, transmitted as 0x09
+< --		Solid Red Ball with Green Right Arrow = 0x00000104, transmitted as 0x0104
+---
+> -- using the bits defined by the above table of the standard.
+169,170c144
+<    walk        (3), -- (B00000100) walk active
+<    ...
+---
+> walk (3) -- (B00000100) walk active
+178,179c152
+<    departing  (4), -- (B1000) track-lane about to be empty 
+<    ...
+---
+> departing (4) -- (B1000) track-lane about to be empty
+182,183d154
+< -- Use:  The StateConfidence data element is used to relate additional data about the confidence of the current movement phase and its estimated time values. 
+< 
+188,189c159
+<    timeLikeklyToChange    (3),
+<    ... -- # LOCAL_CONTENT
+---
+> timeLikeklyToChange (3)
+200,201c170
+<    some       (3), -- (B00001000) Indicates more than one
+<    ...
+---
+> some (3) -- (B00001000) Indicates more than one
+206d174
+<    
+210d177
+<    
+213d179
+<    
+216d181
+<    
+220d184
+<    
+227,228d190
+< 
+< 
+Only in /home/jspring/mmitss/source/Utilities/SPATendecoder/Win32Project1/Win32Project1/module.asn1-1/: module.asn1-1.tgz
+Only in .: module.asn1-2.tgz
+diff -w ./MovementState.c /home/jspring/mmitss/source/Utilities/SPATendecoder/Win32Project1/Win32Project1/module.asn1-1/MovementState.c
+153,167c153,167
+<     { (ASN_TAG_CLASS_CONTEXT | (0 << 2)), 0, 0, 0 }, /* movementName at 103 */
+<     { (ASN_TAG_CLASS_CONTEXT | (1 << 2)), 1, 0, 0 }, /* laneCnt at 105 */
+<     { (ASN_TAG_CLASS_CONTEXT | (2 << 2)), 2, 0, 0 }, /* laneSet at 107 */
+<     { (ASN_TAG_CLASS_CONTEXT | (3 << 2)), 3, 0, 0 }, /* currState at 112 */
+<     { (ASN_TAG_CLASS_CONTEXT | (4 << 2)), 4, 0, 0 }, /* pedState at 114 */
+<     { (ASN_TAG_CLASS_CONTEXT | (5 << 2)), 5, 0, 0 }, /* specialState at 116 */
+<     { (ASN_TAG_CLASS_CONTEXT | (6 << 2)), 6, 0, 0 }, /* timeToChange at 120 */
+<     { (ASN_TAG_CLASS_CONTEXT | (7 << 2)), 7, 0, 0 }, /* stateConfidence at 122 */
+<     { (ASN_TAG_CLASS_CONTEXT | (8 << 2)), 8, 0, 0 }, /* yellState at 127 */
+<     { (ASN_TAG_CLASS_CONTEXT | (9 << 2)), 9, 0, 0 }, /* yellPedState at 130 */
+<     { (ASN_TAG_CLASS_CONTEXT | (10 << 2)), 10, 0, 0 }, /* yellTimeToChange at 134 */
+<     { (ASN_TAG_CLASS_CONTEXT | (11 << 2)), 11, 0, 0 }, /* yellStateConfidence at 135 */
+<     { (ASN_TAG_CLASS_CONTEXT | (12 << 2)), 12, 0, 0 }, /* vehicleCount at 139 */
+<     { (ASN_TAG_CLASS_CONTEXT | (13 << 2)), 13, 0, 0 }, /* pedDetect at 140 */
+<     { (ASN_TAG_CLASS_CONTEXT | (14 << 2)), 14, 0, 0 } /* pedCount at 143 */
+---
+>     { (ASN_TAG_CLASS_CONTEXT | (0 << 2)), 0, 0, 0 }, /* movementName at 89 */
+>     { (ASN_TAG_CLASS_CONTEXT | (1 << 2)), 1, 0, 0 }, /* laneCnt at 91 */
+>     { (ASN_TAG_CLASS_CONTEXT | (2 << 2)), 2, 0, 0 }, /* laneSet at 93 */
+>     { (ASN_TAG_CLASS_CONTEXT | (3 << 2)), 3, 0, 0 }, /* currState at 98 */
+>     { (ASN_TAG_CLASS_CONTEXT | (4 << 2)), 4, 0, 0 }, /* pedState at 100 */
+>     { (ASN_TAG_CLASS_CONTEXT | (5 << 2)), 5, 0, 0 }, /* specialState at 102 */
+>     { (ASN_TAG_CLASS_CONTEXT | (6 << 2)), 6, 0, 0 }, /* timeToChange at 105 */
+>     { (ASN_TAG_CLASS_CONTEXT | (7 << 2)), 7, 0, 0 }, /* stateConfidence at 107 */
+>     { (ASN_TAG_CLASS_CONTEXT | (8 << 2)), 8, 0, 0 }, /* yellState at 111 */
+>     { (ASN_TAG_CLASS_CONTEXT | (9 << 2)), 9, 0, 0 }, /* yellPedState at 114 */
+>     { (ASN_TAG_CLASS_CONTEXT | (10 << 2)), 10, 0, 0 }, /* yellTimeToChange at 117 */
+>     { (ASN_TAG_CLASS_CONTEXT | (11 << 2)), 11, 0, 0 }, /* yellStateConfidence at 118 */
+>     { (ASN_TAG_CLASS_CONTEXT | (12 << 2)), 12, 0, 0 }, /* vehicleCount at 121 */
+>     { (ASN_TAG_CLASS_CONTEXT | (13 << 2)), 13, 0, 0 }, /* pedDetect at 122 */
+>     { (ASN_TAG_CLASS_CONTEXT | (14 << 2)), 14, 0, 0 } /* pedCount at 125 */
+175,176c175,176
+< 	14,	/* Start extensions */
+< 	16	/* Stop extensions */
+---
+> 	-1,	/* Start extensions */
+> 	-1	/* Stop extensions */
+diff -w ./MovementState.h /home/jspring/mmitss/source/Utilities/SPATendecoder/Win32Project1/Win32Project1/module.asn1-1/MovementState.h
+48,51d47
+< 	/*
+< 	 * This type is extensible,
+< 	 * possible extensions are below.
+< 	 */
+diff -w ./PedestrianDetect.c /home/jspring/mmitss/source/Utilities/SPATendecoder/Win32Project1/Win32Project1/module.asn1-1/PedestrianDetect.c
+90d89
+< 	/* This list is extensible */
+97d95
+< 	/* This list is extensible */
+103c101
+< 	5,	/* Extensions before this member */
+---
+> 	0,	/* Enumeration is not extensible */
+diff -w ./PedestrianDetect.h /home/jspring/mmitss/source/Utilities/SPATendecoder/Win32Project1/Win32Project1/module.asn1-1/PedestrianDetect.h
+27,29d26
+< 	/*
+< 	 * Enumeration is extensible
+< 	 */
+diff -w ./PedestrianSignalState.c /home/jspring/mmitss/source/Utilities/SPATendecoder/Win32Project1/Win32Project1/module.asn1-1/PedestrianSignalState.c
+90d89
+< 	/* This list is extensible */
+97d95
+< 	/* This list is extensible */
+103c101
+< 	5,	/* Extensions before this member */
+---
+> 	0,	/* Enumeration is not extensible */
+diff -w ./PedestrianSignalState.h /home/jspring/mmitss/source/Utilities/SPATendecoder/Win32Project1/Win32Project1/module.asn1-1/PedestrianSignalState.h
+27,29d26
+< 	/*
+< 	 * Enumeration is extensible
+< 	 */
+diff -w ./SPAT.c /home/jspring/mmitss/source/Utilities/SPATendecoder/Win32Project1/Win32Project1/module.asn1-1/SPAT.c
+118c118
+<     { (ASN_TAG_CLASS_CONTEXT | (2 << 2)), 2, 0, 0 } /* intersections at 10 */
+---
+>     { (ASN_TAG_CLASS_CONTEXT | (2 << 2)), 2, 0, 0 } /* intersections at 11 */
+126,127c126,127
+< 	2,	/* Start extensions */
+< 	4	/* Stop extensions */
+---
+> 	-1,	/* Start extensions */
+> 	-1	/* Stop extensions */
+diff -w ./SPAT.h /home/jspring/mmitss/source/Utilities/SPATendecoder/Win32Project1/Win32Project1/module.asn1-1/SPAT.h
+38,41d37
+< 	/*
+< 	 * This type is extensible,
+< 	 * possible extensions are below.
+< 	 */
+diff -w ./SpecialSignalState.c /home/jspring/mmitss/source/Utilities/SPATendecoder/Win32Project1/Win32Project1/module.asn1-1/SpecialSignalState.c
+91d90
+< 	/* This list is extensible */
+99d97
+< 	/* This list is extensible */
+105c103
+< 	6,	/* Extensions before this member */
+---
+> 	0,	/* Enumeration is not extensible */
+diff -w ./SpecialSignalState.h /home/jspring/mmitss/source/Utilities/SPATendecoder/Win32Project1/Win32Project1/module.asn1-1/SpecialSignalState.h
+28,30d27
+< 	/*
+< 	 * Enumeration is extensible
+< 	 */
+diff -w ./StateConfidence.c /home/jspring/mmitss/source/Utilities/SPATendecoder/Win32Project1/Win32Project1/module.asn1-1/StateConfidence.c
+90d89
+< 	/* This list is extensible */
+97d95
+< 	/* This list is extensible */
+103c101
+< 	5,	/* Extensions before this member */
+---
+> 	0,	/* Enumeration is not extensible */
+diff -w ./StateConfidence.h /home/jspring/mmitss/source/Utilities/SPATendecoder/Win32Project1/Win32Project1/module.asn1-1/StateConfidence.h
+27,29d26
+< 	/*
+< 	 * Enumeration is extensible
+< 	 */

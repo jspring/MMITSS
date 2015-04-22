@@ -1,0 +1,228 @@
+J2735SPATMESSAGE DEFINITIONS AUTOMATIC TAGS ::= 
+BEGIN
+
+SPAT ::= SEQUENCE {
+   msgID         DSRCmsgID, 
+   name          DescriptiveName OPTIONAL, 
+                 -- human readable name for this collection 
+                 -- to be used only in debug mode
+
+   intersections SEQUENCE (SIZE(1..32)) OF IntersectionState,
+                 -- sets of SPAT data (one per intersection)  
+
+   ... -- # LOCAL_CONTENT
+   }
+
+DSRCmsgID ::= ENUMERATED {
+   reserved                        (0), 
+   alaCarteMessage                 (1),  -- ACM
+   basicSafetyMessage              (2),  -- BSM, heartbeat msg
+   basicSafetyMessageVerbose       (3),  -- used for testing only
+   commonSafetyRequest             (4),  -- CSR
+   emergencyVehicleAlert           (5),  -- EVA
+   intersectionCollisionAlert      (6),  -- ICA
+   mapData                         (7),  -- MAP, GID, intersections 
+   nmeaCorrections                 (8),  -- NMEA
+   probeDataManagement             (9),  -- PDM
+   probeVehicleData                (10), -- PVD
+   roadSideAlert                   (11), -- RSA
+   rtcmCorrections                 (12), -- RTCM
+   signalPhaseAndTimingMessage     (13), -- SPAT
+   signalRequestMessage            (14), -- SRM
+   signalStatusMessage             (15), -- SSM
+   travelerInformation             (16), -- TIM
+   
+   ... -- # LOCAL_CONTENT
+   } 
+   -- values to 127 reserved for std use
+   -- values 128 to 255 reserved for local use
+
+
+DescriptiveName ::= IA5String (SIZE(1..63))
+
+IntersectionState ::= SEQUENCE {
+   name        DescriptiveName OPTIONAL, 
+               -- human readable name for intersection  
+               -- to be used only in debug mode
+   id          IntersectionID, 
+               -- this provided a unique mapping to the 
+               -- intersection map in question
+               -- which provides complete location 
+               -- and approach/move/lane data
+   status      IntersectionStatusObject,
+               -- general status of the controller
+   timeStamp   TimeMark OPTIONAL, 
+               -- the point in local time that
+               -- this message was constructed
+   lanesCnt    INTEGER(1..255) OPTIONAL,  
+               -- number of states to follow (not always
+               -- one per lane because sign states may be shared)
+   states      SEQUENCE (SIZE(1..255)) OF MovementState,
+               -- each active Movement/lane is given in turn
+               -- and contains its state, and seconds
+               -- to the next event etc. 
+   priority    SignalState OPTIONAL,
+               -- the active priority state data, if present
+   preempt     SignalState OPTIONAL,
+               -- the active preemption state data, if present
+   
+   ... -- # LOCAL_CONTENT
+   }
+
+
+
+IntersectionID ::= OCTET STRING (SIZE(2..4))
+   -- note that often only the lower 16 bits of this value
+   -- will be sent as the operational region (state etc) will
+   -- be known and not sent each time
+
+IntersectionStatusObject ::= OCTET STRING (SIZE(1)) 
+   -- with bits set as follows Bit #:
+   -- 0    Manual Control is enabled.  Timing reported is per 
+   --      programmed values, etc but person at cabinet can 
+   --      manually request that certain intervals are terminated 
+   --      early (e.g. green).
+   -- 1    Stop Time is activated and all counting/timing has stopped.
+   -- 2    Intersection is in Conflict Flash.
+   -- 3    Preempt is Active
+   -- 4    Transit Signal Priority (TSP) is Active
+   -- 5    Reserved
+   -- 6    Reserved
+   -- 7    Reserved as zero
+
+TimeMark ::= INTEGER (0..12002)
+   -- In units of 1/10th second from local UTC time
+   -- A range of 0~600 for even minutes, 601~1200 for odd minutes
+   -- 12001 to indicate indefinite time
+   -- 12002 to be used when value undefined or unknown
+
+LaneCount ::= INTEGER (0..255) -- the number of lanes to follow
+
+MovementState ::= SEQUENCE {
+   -- The MovementNumber is contained in the enclosing DF. 
+   movementName     DescriptiveName OPTIONAL,
+                    -- uniquely defines movement by name   
+   laneCnt          LaneCount OPTIONAL,
+                    -- the number of lanes to follow
+   laneSet          LaneSet,
+                    -- each encoded as a LaneNumber, 
+                    -- the collection of lanes, by num, 
+                    -- to which this state data applies 
+  -- For the current movement State, you may CHOICE one of the below:
+          currState     SignalLightState OPTIONAL,    
+                        -- the state of a Motorised lane
+          pedState      PedestrianSignalState OPTIONAL,
+                        -- the state of a Pedestrian type lane
+          specialState  SpecialSignalState OPTIONAL,
+                        -- the state of a special type lane
+                        -- such as a dedicated train lane
+   
+   timeToChange     TimeMark,  
+                    -- the point in time this state will change 
+   stateConfidence  StateConfidence  OPTIONAL,
+   
+   -- Yellow phase time intervals 
+   -- (used for motorised vehicle lanes and pedestrian lanes)
+   -- For the yellow Signal State, a CHOICE of one of the below:
+           yellState     SignalLightState OPTIONAL,   
+                         -- the next state of a 
+                         -- Motorised lane
+           yellPedState  PedestrianSignalState OPTIONAL,
+                         -- the next state of a 
+                         -- Pedestrian type lane
+   
+   yellTimeToChange     TimeMark  OPTIONAL,    
+   yellStateConfidence  StateConfidence  OPTIONAL,
+   
+   -- below items are all optional based on use and context 
+   -- some are used only for ped lane types
+   vehicleCount  ObjectCount OPTIONAL, 
+   pedDetect     PedestrianDetect  OPTIONAL,
+                 -- true if ANY ped are detected crossing 
+                 -- the above lanes
+   pedCount      ObjectCount OPTIONAL,  
+                 -- est count of peds
+   ... -- # LOCAL_CONTENT
+   }
+
+LaneSet ::= OCTET STRING (SIZE(1..127)) 
+    -- each byte encoded as a: LaneNumber, 
+    -- the collection of lanes, by num, 
+    -- to which some state data applies
+
+SignalLightState ::= INTEGER (0..536870912)
+  -- The above bit ranges map to each type of direction
+  -- using the bits defined by the below table of the standard.
+
+--* Note: DARK = 0x00000000
+
+--The Signal Light State value is built by ORing the various bitmasks together for that approach.
+
+-- Examples:	Solid Green Ball = 0x00000001, transmitted as 0x01
+--		Flashing Green Ball = 0x00000009, transmitted as 0x09
+--		Solid Red Ball with Green Right Arrow = 0x00000104, transmitted as 0x0104
+
+PedestrianSignalState ::= ENUMERATED {
+   unavailable (0), -- Not Equipped or unavailable
+   stop        (1), -- (B00000001) do not walk
+   caution     (2), -- (B00000010) flashing dont walk sign
+   walk        (3), -- (B00000100) walk active
+   ...
+   } -- one byte
+
+SpecialSignalState ::= ENUMERATED {
+   unknown    (0),
+   notInUse   (1), -- (B0001) default state, empty, not in use
+   arriving   (2), -- (B0010) track-lane about to be occupied   
+   present    (3), -- (B0100) track-lane is occupied with vehicle 
+   departing  (4), -- (B1000) track-lane about to be empty 
+   ...
+   } -- one byte
+
+-- Use:  The StateConfidence data element is used to relate additional data about the confidence of the current movement phase and its estimated time values. 
+
+StateConfidence ::= ENUMERATED {
+   unKnownEstimate        (0), 
+   minTime                (1), 
+   maxTime                (2), 
+   timeLikeklyToChange    (3),
+   ... -- # LOCAL_CONTENT
+   }
+     -- values to 127 reserved for std use
+     -- values 128 to 255 reserved for local use
+
+ObjectCount ::= INTEGER (0..6000) -- a count of objects
+
+PedestrianDetect ::= ENUMERATED {
+   none       (0), -- (B00000001) 
+   maybe      (1), -- (B00000010)
+   one        (2), -- (B00000100) 
+   some       (3), -- (B00001000) Indicates more than one
+   ...
+   } -- one byte
+
+SignalState ::= OCTET STRING (SIZE(1)) 
+    -- With bits set as follows:
+   
+    -- Bit 7 (MSB) Set if the state is currently active
+    -- only one active state can exist at a time, and 
+    -- this state should be sent first in any sequences
+   
+    -- Bits 6~4 The preempt or priority value that is 
+    -- being described.  
+   
+    -- Bits 3~0 the state bits, indicating either a 
+    -- preemption or a priority use as follows: 
+   
+    -- If a preemption: to follow the 
+    -- preemptState object of NTCIP 1202 v2.19f  
+    -- See PreemptState for bit definitions.
+   
+    -- If a prioirty to follow the 
+    -- tspInputStatus object utilized in the 
+    -- NYC ASTC2 traffic controller
+    -- See PriorityState for bit definitions
+
+END
+
+
