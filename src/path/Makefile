@@ -6,16 +6,17 @@
 
 SERVER_LIB = $(OBJDIR)/libserver_lib.a
 SERVER_LIB_OBJS = $(OBJDIR)/server_lib.o
-AZ_INC_DIR = /home/MMITSS/src/path/module.asn1-2
-AZ_LD_DIR = /home/MMITSS/src/path/module.asn1-2
-MMITSS_DIR = /home/mmitss
-SAVARI_INC = /home/jspring/savari/SDK_toolchain_and_Images/RSE/savari_sdk/toolchain/include/c++/4.1.2
-SAVARI_OTHER = $(SAVARI_INC)/i386-uclibc/
-PERF_OBS_DIR = $(MMITSS_DIR)/source/MRP/MRP_PerformanceObserver/Linux/MMITSS_rsu_PerformanceObserver_TT
+AZ_INC_DIR = ./module.asn1-2
+AZ_LD_DIR = ./module.asn1-2
+#MMITSS_DIR = /home/mmitss
+#SAVARI_INC = /home/jspring/savari/SDK_toolchain_and_Images/RSE/savari_sdk/toolchain/include/c++/4.1.2
+#SAVARI_OTHER = $(SAVARI_INC)/i386-uclibc/
+#PERF_OBS_DIR = $(MMITSS_DIR)/source/MRP/MRP_PerformanceObserver/Linux/MMITSS_rsu_PerformanceObserver_TT
 
 PATH_LIBS = -lserver_lib -ldl -lrt
 PATH_LDFLAGS += -L./lnx -L$(AZ_LD_DIR)
-PATH_CFLAGS += -Wall -pg -I. -I$(AZ_INC_DIR) -I$(PERF_OBS_DIR) -I$(SAVARI_INC) -I$(SAVARI_OTHER) -Iinclude -fpermissive
+#PATH_CFLAGS += -Wall -pg -I. -I$(AZ_INC_DIR) -I$(PERF_OBS_DIR) -I$(SAVARI_INC) -I$(SAVARI_OTHER) -Iinclude -fpermissive
+PATH_CFLAGS += -Wall -pg -I. -I$(AZ_INC_DIR)
 PATH_OBJS = $(OBJDIR)/timestamp.o \
 	$(OBJDIR)/sys_rt_linux.o \
 	$(OBJDIR)/ab3418_libudp.o \
@@ -25,9 +26,6 @@ PATH_OBJS = $(OBJDIR)/timestamp.o \
 OBJDIR = lnx
 
 EXEC =$(OBJDIR)/server $(OBJDIR)/client $(OBJDIR)/ab3418commudp $(OBJDIR)/sim_spat $(OBJDIR)/data_manager  $(OBJDIR)/sendSoftCall
-#EXEC = $(OBJDIR)/server $(OBJDIR)/client $(OBJDIR)/ab3418commudp $(OBJDIR)/sim_spat
-#EXEC = $(OBJDIR)/client $(OBJDIR)/ab3418commudp $(OBJDIR)/sim_spat
-
 
 all: $(OBJDIR) $(SERVER_LIB) $(PATH_OBJS) $(EXEC) 
 
