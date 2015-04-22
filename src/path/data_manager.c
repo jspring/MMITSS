@@ -27,19 +27,20 @@ typedef struct {
 #define TCP 1
 	unsigned short outport;
 	unsigned short inport;
+	int inportfd;
 	unsigned short fwdfd[3];// file descriptor of port to forward data from a read buffer to a write buffer
 #define NUMOUTPORTS	3
 } port_t;
 
 port_t port[] = { 
-		{"PriorityRequestModule", UDP, PRIO_REQ_OUTPORT, PRIO_REQ_INPORT, {0, 0, 0} },
-		{"TrajectoryAwareModule", UDP,  TRAJ_AWARE_OUTPORT, TRAJ_AWARE_INPORT, {0, 0, 0} },
-		{"NomadicTrajectoryAwareModule", UDP,  NOMADIC_TRAJ_AWARE_OUTPORT, NOMADIC_TRAJ_AWARE_INPORT, {0, 0, 0} },
-		{"TrafficControlModule", TCP,  TRAF_CTL_OUTPORT, TRAF_CTL_INPORT, {0, 0, 0} },
-		{"TrafficControlInterfaceModule", TCP,  TRAF_CTL_IFACE_OUTPORT, TRAF_CTL_IFACE_INPORT, {SPAT_MAP_BCAST_INPORT, 0, 0} },
-		{"SpatMapBroadcastModule", UDP,  SPAT_MAP_BCAST_OUTPORT, SPAT_MAP_BCAST_INPORT, {0, 0, 0} },
-		{"PerformanceObserverModule", UDP,  PERF_OBSRV_OUTPORT, PERF_OBSRV_INPORT, {0, 0, 0} },
-		{"NomadicDeviceModule", UDP,  NOMADIC_DEV_OUTPORT, NOMADIC_DEV_INPORT, {0, 0, 0} }
+		{"PriorityRequestModule", UDP, PRIO_REQ_OUTPORT, PRIO_REQ_INPORT, 0, {0, 0, 0} },
+		{"TrajectoryAwareModule", UDP,  TRAJ_AWARE_OUTPORT, TRAJ_AWARE_INPORT, 0, {0, 0, 0} },
+		{"NomadicTrajectoryAwareModule", UDP,  NOMADIC_TRAJ_AWARE_OUTPORT, NOMADIC_TRAJ_AWARE_INPORT, 0, {0, 0, 0} },
+		{"TrafficControlModule", TCP,  TRAF_CTL_OUTPORT, TRAF_CTL_INPORT, 0, {TRAF_CTL_IFACE_INPORT, 0, 0} },
+		{"TrafficControlInterfaceModule", TCP,  TRAF_CTL_IFACE_OUTPORT, TRAF_CTL_IFACE_INPORT, 0, {SPAT_MAP_BCAST_INPORT, 0, 0} },
+		{"SpatMapBroadcastModule", UDP,  SPAT_MAP_BCAST_OUTPORT, SPAT_MAP_BCAST_INPORT, 0, {0, 0, 0} },
+		{"PerformanceObserverModule", UDP,  PERF_OBSRV_OUTPORT, PERF_OBSRV_INPORT, 0, {0, 0, 0} },
+		{"NomadicDeviceModule", UDP,  NOMADIC_DEV_OUTPORT, NOMADIC_DEV_INPORT, 0, {0, 0, 0} }
 };
 
 int NUMPORTS = sizeof(port) / sizeof(port_t);
@@ -189,6 +190,7 @@ int main( int argc, char *argv[]) {
 		else {
 			printf("udp_allow_all succeeded for %s input port (%d)\n", port[i].portdesc, port[i].inport);
 			FD_SET(newsockfd[j+1], &writefds_sav); //Remember: "in" is FROM the data manager TO the module
+			port[i].inportfd = newsockfd[j+1];
 			if(newsockfd[j+1] > maxfd) maxfd = newsockfd[j+1];
 				printf("UDP newsockfd[%d] %d maxfd %d\n", j+1, newsockfd[j+1], maxfd);
 		}
@@ -228,6 +230,7 @@ int main( int argc, char *argv[]) {
 			remote_addr[j+1].sin_family = AF_INET;
 			remote_addr[j+1].sin_addr.s_addr = inet_addr(remote_ip);  //htonl(INADDR_ANY);
 			remote_addr[j+1].sin_port = htons(port[i].inport);
+			port[i].inportfd = sockfd[j+1];
 			FD_SET(sockfd[j+1], &writefds_sav);
 			if(sockfd[j+1] > maxfd) maxfd = sockfd[j+1];
 				printf("TCP sockfd[%d] %d maxfd %d\n", j+1, sockfd[j+1], maxfd);
@@ -242,7 +245,9 @@ int main( int argc, char *argv[]) {
 	for(j = 0; (j < 3) && (port[i].fwdfd[j] != 0); j++) {
 		for(k = 0; k < NUMPORTS; k++) {
 			if(port[i].fwdfd[j] == port[k].inport) {
-				port[i].fwdfd[j] = newsockfd[k+1];
+				printf("Setting %s forward port to input port %d ", port[i].portdesc, port[k].inport);
+				port[i].fwdfd[j] = port[k].inportfd;
+				printf("file descriptor %d\n", port[i].fwdfd[j]);
     			}
     		}
     	}
@@ -417,17 +422,17 @@ int main( int argc, char *argv[]) {
 			
 			//Now try to forward MMITSS message to all appropriate clients
 			if(port[i].fwdfd[0] != 0) {
-				printf("Trying forwarding write for %s input port (%d)\n", port[i].portdesc, port[i].inport);
 				for(k = 0; (port[i].fwdfd[k] != 0) && (k < NUMOUTPORTS); k++) {
+					printf("Trying forwarding write from %s output port (%d) to input fd %d\n", port[i].portdesc, port[i].outport, port[i].fwdfd[k]);
 					if( (write(port[i].fwdfd[k], &buf[i][0], retval)) != retval ) {
-		   				sprintf(tempstr2, "forwarding write failed for %s input port (%d)", port[i].portdesc, port[i].inport);
+		   				sprintf(tempstr2, "forwarding write failed for %s output port (%d) to input fd %d", port[i].portdesc, port[i].outport, port[i].fwdfd[k]);
 						perror(tempstr2);
 					}
 				}
 			}//end of forwarding MMITTSS message
 	  	}//end of MMITSS message test
 		else {
-			switch(buf[i][0]) {
+			switch(buf[i][2]) {
 				case MSG_ID_SIG_PLAN_POLL:
 	    				if( FD_ISSET(newsockfd[j+1], &writefds)){
 						printf("Trying sig_plan_msg write for %s(%d)\n", port[i].portdesc, port[i].inport);
@@ -470,7 +475,7 @@ int main( int argc, char *argv[]) {
 							printf("%hhx ", buf[i][j]);
 						printf("Done with unknown message\n\n");
 					}
-			}//end of switch(buf[i][0])
+			}//end of switch(buf[i][2])
 	  	}//end of non-MMITSS else
 	}//end of successful message read else
     }//end of attempt to read client output socket
@@ -479,8 +484,8 @@ int main( int argc, char *argv[]) {
 }//end of main
 
 /* Dump the buffer out to the specified FILE */
-static int write_out(const void *buffer, size_t size, void *key) {
-        FILE *fp = (FILE *)key;
-        return (fwrite(buffer, 1, size, fp) == size) ? 0 : -1;
-}
+//static int write_out(const void *buffer, size_t size, void *key) {
+//        FILE *fp = (FILE *)key;
+//        return (fwrite(buffer, 1, size, fp) == size) ? 0 : -1;
+//}
 
