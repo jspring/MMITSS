@@ -54,10 +54,11 @@ int get_request(unsigned char msg_type, unsigned char page, unsigned char block,
 int spat2battelle(raw_signal_status_msg_t *ca_spat, battelle_spat_t *battelle_spat, phase_timing_t *phase_timing[8], int verbose);
 int get_coord_params(plan_params_t *plan_params, int plan_num, int wait_for_data, int *fpout, int *fpin, char verbose);
 int set_coord_params(plan_params_t *plan_params, int plan_num, mschedule_t *mschedule, int wait_for_data, int fdout, int fdin, char verbose);
+int set_soft_call(mmitss_control_msg_t *mmitss_control_msg, int fdout, int fdin, char verbose);
 int build_sigplanmsg(sig_plan_msg_t *sig_plan_msg, phase_timing_t *phase_timing[], plan_params_t *current_plan_params,get_long_status8_resp_mess_typ *long_status8, int verbose);
 int get_phase_flags(phase_flags_t *phase_flags, int wait_for_data, int *fpout, int *fpin, char verbose);
 
-char *timing_strings[] = {
+const char *timing_strings[] = {
         "Walk_1",
         "Flash_dont_walk",
         "Minimum_green",
@@ -76,7 +77,7 @@ char *timing_strings[] = {
         "All-red"
 };
 
-char *plan_strings[] = {
+const char *plan_strings[] = {
         "Cycle_length",
         "Green_factor_1",
         "Green_factor_2",
@@ -933,6 +934,94 @@ int set_coord_params(plan_params_t *plan_params, int plan_num, mschedule_t *msch
 	return 0;
 }
 
+int set_soft_call(mmitss_control_msg_t *mmitss_control_msg, int fdout, int fdin, char verbose) {
+
+	int msg_len;
+        fd_set readfds;
+        fd_set writefds;
+        int selectval = 1000;
+        struct timeval timeout;
+        char *inportisset = "not yet initialized";
+        char *outportisset = "not yet initialized";
+	int ser_driver_retval;
+	set_softcall_mess_t soft_call_mess;
+	char *softcall_mess_buf = (char *)&soft_call_mess;
+	gen_mess_typ readBuff;
+	int i;
+	int valid_request;
+
+	//Set the header and tail
+	soft_call_mess.start_flag = 0x7e;	//start flag
+	soft_call_mess.address = 0x05;	//controller address
+	soft_call_mess.control = 0x13;	// 0x13 - unnumbered information, individual address
+	soft_call_mess.ipi =	 0xC0;	//IPI - 0xc0 - NTCIP Class B Protocol
+	soft_call_mess.mess_type=0x9A;	// 0x9A – Set soft call message
+	soft_call_mess.veh_call = 0;	// Bits 0-7 phase 1-8
+	soft_call_mess.ped_call = 0;    // Bits 0-7 phase 1-8
+	soft_call_mess.prio_call = 0;   // Bits 0-7 phase 1-8
+	soft_call_mess.spare1 = 0;      //reserved 
+	soft_call_mess.spare2 = 0;      //reserved 
+	soft_call_mess.spare3 = 0;      //reserved 
+	soft_call_mess.spare4 = 0;      //reserved 
+	soft_call_mess.spare5 = 0;      //reserved 
+	soft_call_mess.FCSmsb = 0;      // FCS (Frame Checking Sequence) MSB
+	soft_call_mess.FCSlsb = 0;      // FCS (Frame Checking Sequence) LSB
+	soft_call_mess.end_flag = 0x7e; // end flag
+
+	valid_request = 0;
+
+	if( (mmitss_control_msg->call_obj == 1) && (mmitss_control_msg->call_type == 1) ) {
+		soft_call_mess.ped_call = mmitss_control_msg->call_phase;
+		valid_request = 1;
+	}
+	if( (mmitss_control_msg->call_obj == 1) && (mmitss_control_msg->call_type == 2) ) {
+		valid_request = 0;
+	}
+	if( (mmitss_control_msg->call_obj == 2) && (mmitss_control_msg->call_type == 1) ) {
+		soft_call_mess.veh_call = mmitss_control_msg->call_phase;
+		valid_request = 1;
+	}
+	if( (mmitss_control_msg->call_obj == 2) && (mmitss_control_msg->call_type == 2) ) {
+		soft_call_mess.veh_call = mmitss_control_msg->call_phase;
+		valid_request = 1;
+	}
+	if( (mmitss_control_msg->call_obj == 3) && (mmitss_control_msg->call_type == 1) ) {
+		soft_call_mess.prio_call = mmitss_control_msg->call_phase;
+		valid_request = 1;
+	}
+	if( (mmitss_control_msg->call_obj == 3) && (mmitss_control_msg->call_type == 2) ) {
+		soft_call_mess.prio_call = mmitss_control_msg->call_phase;
+		valid_request = 1;
+	}
+
+printf("soft_call: veh_call %#hhx ped_call %#hhx prio_call %#hhx\n", soft_call_mess.veh_call, soft_call_mess.ped_call, soft_call_mess.prio_call);
+	
+	/* Now append the FCS. */
+	msg_len = sizeof(set_softcall_mess_t) - 4;
+	fcs_hdlc(msg_len, softcall_mess_buf, verbose);
+	FD_ZERO(&writefds);
+	FD_SET(fdout, &writefds);
+	timeout.tv_sec = 1;
+	timeout.tv_usec = 0;
+	if( (selectval = select(fdout+1, NULL, &writefds, NULL, &timeout)) <=0) {
+		perror("set_soft_call select 1");
+		outportisset = (FD_ISSET(fdout, &writefds)) == 0 ? "no" : "yes";
+		printf("set_soft_call 2: fdout %d selectval %d outportisset %s\n", fdout, selectval, outportisset);
+		return -3;
+	}
+printf("set_soft_call: ");
+for(i=0; i<sizeof(set_softcall_mess_t); i++)
+   printf("%#hhx ", softcall_mess_buf[i]);
+printf("\n");
+	write ( fdout, softcall_mess_buf, sizeof(set_softcall_mess_t));
+	fflush(NULL);
+
+	ser_driver_retval = 100;
+
+	if(verbose != 0)
+		printf("set_soft_call 3-end: fdin %d selectval %d inportisset %s fdout %d selectval %d outportisset %s ser_driver_retval %d\n", fdin, selectval, inportisset, fdout, selectval, outportisset, ser_driver_retval);
+	return 0;
+}
 int get_status(int wait_for_data, gen_mess_typ *readBuff, int fpin, int fpout, char verbose) {
 	int msg_len;
         fd_set readfds;
