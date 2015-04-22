@@ -913,8 +913,8 @@ int init_spat(SPAT_t *spatType, unsigned char *spatbuf, int *spatmsgsize, sig_pl
 		OCTET_STRING_new_fromBuf(&asn_DEF_OCTET_STRING, spat_msg_name, -1);
 
 
-	if(intersection_name == NULL)
-		intersection_name = "El_Camino_and_Matadero";
+	if(intersection_name != NULL)
+//		intersection_name = "El_Camino_and_Matadero";
         spatType->intersections.list.array[0]->name =
 		OCTET_STRING_new_fromBuf(&asn_DEF_OCTET_STRING, intersection_name+2, -1);
 
